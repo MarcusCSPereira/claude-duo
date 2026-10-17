@@ -7,6 +7,10 @@ that remain. Copy the shared `claude-instances-common.sh` with the other scripts
 The [deeper limitation review and roadmap](docs/LIMITATIONS_AND_ROADMAP.md)
 includes controlled evidence and the proposed GUI launch architecture; it does
 not claim that all remaining limitations have been fixed.
+The [current execution roadmap in Portuguese](docs/ROADMAP_PT_BR.md) lists the
+remaining work, release criteria and the steps that need account login. The
+hardened branch is still experimental; graphical two-account Code behavior has
+not been validated.
 
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own
