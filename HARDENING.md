@@ -37,6 +37,11 @@ person using Claude to interact with the Claude Code CLI.
   the last holder exits, including after SIGKILL; the persistent lock file is
   not a stale-lock indicator. Legacy `.refresh-lock` directories still require
   inspection rather than being blindly removed.
+- Coordinate cache cleanup and opt-in profile checkpoints with that same lock.
+  Checkpoints copy Desktop and Code as one pair, compare source/output hashes
+  and metadata observations, bind to the configured pair/app bytes and publish
+  exclusively. Pending/partial copies cannot pass published verification; there
+  is no restore command. See [PROFILE_CHECKPOINTS.md](docs/PROFILE_CHECKPOINTS.md).
 - Fail closed if process enumeration fails. Stop cache cleanup if any observed
   Claude process shares the profile, including stock Claude using Personal.
 - Create/restrict profile and Code config directories to mode 0700. Restrict
@@ -47,8 +52,8 @@ person using Claude to interact with the Claude Code CLI.
 - Validate icon hue, including finite Swift numbers.
 
 Copy **all** `bin/claude-*` files when installing: the entry script now needs
-the shared library, `claude-build-worker.sh` and `claude-transaction.c` in the
-same directory. Rebuild/recovery requires macOS 12+ and Xcode Command Line Tools;
+the shared library, all internal workers and both C sources in the same
+directory. Rebuild/recovery, cache cleanup and checkpoints require macOS 12+ and Xcode Command Line Tools;
 the native helper is compiled locally in a private temporary directory, with
 no downloaded binary or Python runtime dependency. Daily app launching does
 not compile it. A normal rebuild is needed to
@@ -122,6 +127,8 @@ a follow-up. A previous bundle is not necessarily known-good. It is not a
 backup of profiles, projects or Keychain credentials. There is no automatic
 binary downgrade: a newer app may already have migrated profile data. A safe
 restore needs a compatible closed-profile checkpoint and separate validation.
+The new content checkpoint primitive is one prerequisite, not a complete
+account/Keychain/project backup or proof that a particular restore is compatible.
 
 ## Remaining limits
 

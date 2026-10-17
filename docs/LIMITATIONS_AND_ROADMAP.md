@@ -52,7 +52,7 @@ the old bundle remains in its private transaction directory after exchange.
 `--recover` observes the recorded inode layout and checks a committed
 launcher/signature without replaying or undoing the operation.
 
-The suite now contains **60 tests**, including 14 native transaction tests.
+The publication milestone passed **60 tests**, including 14 native transaction tests.
 They exercise actual macOS rename/lock/ACL/sync operations, kill disposable
 helpers before/after exchange, check exclusive-publication conflicts, and
 refuse malformed/linked journals or uncertain layouts. Failure/stop injection
@@ -63,6 +63,31 @@ This addresses the two-rename gap and stale cooperating-process locks. It does
 not provide power-loss durability, automatic rollback, compatible profile
 restore, automatic retention pruning or isolation from external/same-user
 programs. A previous bundle is retained, not certified known-good.
+
+## Implemented checkpoint prerequisite
+
+An opt-in content checkpoint now copies the configured Desktop/Code pair into
+private pending staging, verifies full tree hashes and repeated source metadata
+witnesses, binds to the pair/app bytes and publishes exclusively as one directory.
+It refuses observed users/unknown observations, verifies the open-file observer's
+own visibility probe and rechecks sources before commit. Cache cleanup now shares
+the native maintenance lock with rebuilds/checkpoints. Partial staging is retained
+and cannot be accepted as a published checkpoint. See
+[PROFILE_CHECKPOINTS.md](PROFILE_CHECKPOINTS.md) for the protocol and strict format.
+
+This is a prerequisite for reviewed migration/restore, not completion of that
+roadmap item. There is no restore, schema compatibility proof, Keychain/project
+backup or point-in-time snapshot. Links, ACLs, extended attributes and other
+unsupported metadata cause refusal rather than silent omission. Real accounts
+and installed apps/profiles remain untouched.
+
+The current suite passes **85 offline tests**: the earlier 60 plus 18 native
+checkpoint tests and 7 checkpoint/maintenance policy tests. A separate synthetic
+integration check uses actual `lsof` and a different process holding a fixture
+file open: idle creation/verification succeeds and the open handle prevents any
+new staging/publication. Signature/Claude process observations remain mocked;
+this does not validate real account contents or login. Sanitized results and
+tested code hashes are in [evidence/profile-checkpoints.json](evidence/profile-checkpoints.json).
 
 ## Threat model and evidence limits
 

@@ -108,22 +108,19 @@ instance splits both.
 Enterprise | com.example.claude-enterprise | …/Claude-Enterprise | 212 | CLAUDE_CONFIG_DIR=~/.claude-work
 ```
 
-Verify it actually reached the process — a launcher that silently lost the export looks
-identical from the outside:
+Check the complete generated launcher and local signature without dumping the
+running process's environment:
 
 ```bash
-claude-apps-refresh.sh --verify                        # the export is in the launcher
-ps eww -o command= -p <pid> | tr ' ' '\n' | grep CLAUDE_CONFIG_DIR
+claude-apps-refresh.sh --verify
 ```
 
 ⚠️ **Pointing an instance at a new config dir does not bring its history along.** Agent-mode
 sessions live in `$CLAUDE_CONFIG_DIR/projects/<encoded-path>/*.jsonl`. Switch the variable
 and the app looks somewhere new — past sessions appear to vanish, though nothing is
-deleted. Copy them across before you switch, or afterwards:
-
-```bash
-cp -Rc ~/.claude/projects/<dir> ~/.claude-work/projects/
-```
+deleted. Keep existing paths until a closed-app backup and compatible migration
+have been reviewed. The [content checkpoint primitive](docs/PROFILE_CHECKPOINTS.md)
+does not migrate histories or establish that a restore is safe.
 
 Watch for a config dir that already holds a **stale copy** of the same session id: the app
 will show the older one and the newer history looks lost. Compare entry counts and last
@@ -136,7 +133,7 @@ Rules the builder enforces, because both are silently destructive:
 - **Code config directories must be unique.** Existing symlinks are resolved;
   dot components and paths differing only in ASCII case are rejected.
 
-Changing an instance's bundle id later forces a fresh sign-in for that instance — macOS
+Changing an instance's bundle id later can force a fresh sign-in for that instance — macOS
 treats it as a different app for keychain purposes.
 
 ### What is isolated, and what is not
@@ -160,7 +157,7 @@ unless you set it per instance. See [Per-instance environment](#per-instance-env
 | | Isolated per instance | Shared |
 |---|---|---|
 | Account, conversations, settings, MCP config | ✅ | |
-| Keychain / login | ✅ | |
+| Keychain / login | Requires GUI/SSO validation; changing bundle IDs can affect access | Same OS user's Keychain remains outside profile-directory isolation |
 | Cowork files, scratch workspaces | ✅ | |
 | Claude Code hooks + agent-mode sessions | ✅ *once `CLAUDE_CONFIG_DIR` is set* | ⚠️ otherwise |
 | SSH keys, git config, the rest of your home dir | | ⚠️ always |
@@ -278,8 +275,9 @@ claude-apps-refresh.sh personal    # or any instance name, or with no argument f
 
 If the source itself is broken, reinstall Claude, then rebuild.
 
-Rebuild/recovery now requires macOS 12+ and Xcode Command Line Tools. Install the
-whole `bin/claude-*` set, including the worker and C source. A kernel lock holds
+Rebuild/recovery, cache cleanup and checkpoints require macOS 12+ and Xcode
+Command Line Tools. Install the whole `bin/claude-*` set, including all workers
+and C sources. A shared kernel lock holds
 across the worker/children and releases on exit; do not remove its persistent
 `.claude-instances.lock` file to force another build. Old `.refresh-lock`
 directories still require inspection. Retained bundles are not automatically
@@ -581,24 +579,26 @@ Run the launcher from Terminal to see the real error:
 `CFBundleIconName` came back — it outranks `CFBundleIconFile`. Rebuild. If the bundle is
 right but Finder is stale, it's the icon cache: `killall Finder`.
 
-### Profile corrupted / conversations missing
+### Profile checkpoints and missing conversations
 
-Restore a backup. These are APFS clones — free to make, instant to restore:
+Preserve the current data before changing paths or attempting repair. A newer
+app may have migrated its databases; replacing just the bundle or one directory
+does not prove safe restoration.
 
-```bash
-# quit the app first
-mv "$HOME/Library/Application Support/Claude-Enterprise" \
-   "$HOME/Library/Application Support/Claude-Enterprise.bad"
-cp -Rc "$HOME/Library/Application Support/Claude-Enterprise.backup-YYYYMMDD-HHMMSS" \
-       "$HOME/Library/Application Support/Claude-Enterprise"
-```
-
-Take one before any risky change — free and instant:
+The optional [checkpoint tool](docs/PROFILE_CHECKPOINTS.md) verifies both Desktop
+and Code directories together with the apps/other users closed:
 
 ```bash
-cp -Rc "$HOME/Library/Application Support/Claude-Enterprise" \
-       "$HOME/Library/Application Support/Claude-Enterprise.backup-$(date +%Y%m%d-%H%M%S)"
+claude-profile-checkpoint.sh create Enterprise
+claude-profile-checkpoint.sh verify Enterprise <printed-checkpoint-UUID>
 ```
+
+It publishes private verified content copies, refuses unsupported metadata and
+retains interrupted staging for inspection. Copies use full storage, may contain
+sensitive credentials/history and are not encrypted by this tool. Keychain and
+external projects are excluded. Repeated observations cannot block external
+writers. There is no restore command or automatic downgrade; a compatible restore
+into fresh paths still needs a separate implementation and validation.
 
 ### Removing an instance
 
@@ -641,8 +641,9 @@ claude-instance-check.sh
 |---|---|
 | Instance config | `~/.config/claude-instances/instances.conf` |
 | Icon masters | `~/.local/share/claude-instances/<name>.icns` |
-| Scripts | `~/bin/claude-*.sh` |
-| Profile backups | `~/Library/Application Support/Claude*.backup-*` |
+| Scripts and native helper sources | `~/bin/claude-*` |
+| Verified content checkpoints | `~/Library/Application Support/Multi Claude Desktop/Checkpoints/<UUID>` |
+| Legacy backups (unverified; not imported) | `~/Library/Application Support/Claude*.backup-*` |
 
 `/Applications/Claude.app` is **never modified** — every script only reads it:
 
