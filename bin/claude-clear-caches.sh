@@ -1,85 +1,41 @@
 #!/bin/bash
-# claude-clear-caches.sh [InstanceName ...]
-#
-# Clears only regenerable caches from an instance's profile, then relaunches it.
-# With no arguments, does every instance in the config.
-#
-# Chromium holds these directories open, so the instance MUST be quit first --
-# deleting them under a live app risks the "Internal error opening backing
-# store" class of failure. This script quits it properly and refuses to proceed
-# if it will not quit.
-#
-# Nothing here touches conversations, settings, logins or MCP config: only
-# Cache, Code Cache, GPUCache, DawnWebGPUCache, DawnGraphiteCache and
-# Shared Dictionary, all of which the app rebuilds on demand.
-#
-# NOTE: an instance cannot clear itself if a Claude Code session is running
-# inside it -- quitting the app ends that session. Run it from Terminal, or from
-# a different instance.
-
+# Only known regenerable caches, only after profile users have stopped.
 set -uo pipefail
-
-CONF="${CLAUDE_INSTANCES_CONF:-$HOME/.config/claude-instances/instances.conf}"
-CACHES="Cache|Code Cache|GPUCache|DawnWebGPUCache|DawnGraphiteCache|Shared Dictionary"
-
-[ -f "$CONF" ] || { echo "error: no instance config at $CONF" >&2; exit 1; }
-
-trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
-
-total_before=$(df -k / | tail -1 | awk '{print $4}')
+source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"
+ci_load_config || exit 1
 rc=0
-
-while IFS= read -r rawline; do
-    rawline="${rawline%%#*}"
-    [ -n "$(trim "$rawline")" ] || continue
-    IFS='|' read -r n i d h e <<<"$rawline"
-    n="$(trim "${n:-}")"; d="$(trim "${d:-}")"; d="${d/#\~/$HOME}"
-    [ -n "$n" ] && [ -n "$d" ] || continue
-
+for i in "${!names[@]}"; do
     if [ "$#" -gt 0 ]; then
-        want=no
-        for arg in "$@"; do
-            [ "$(echo "$arg" | tr '[:upper:]' '[:lower:]')" = "$(echo "$n" | tr '[:upper:]' '[:lower:]')" ] && want=yes
-        done
-        [ "$want" = yes ] || continue
+        selected=no
+        for arg in "$@"; do [ "$(ci_lower "$arg")" != "$(ci_lower "${names[$i]}")" ] || selected=yes; done
+        [ "$selected" = yes ] || continue
     fi
-
-    app="/Applications/Claude $n.app"
-    bid="$(trim "${i:-}")"
-    echo "=== Claude $n ==="
-    [ -d "$d" ] || { echo "  no profile at $d - skipped"; continue; }
-
-    was_running=no
-    if pgrep -f "Claude $n.app/Contents/MacOS/Claude" >/dev/null 2>&1; then
-        was_running=yes
-        echo "  quitting..."
-        /usr/bin/osascript -e "tell application id \"$bid\" to quit" >/dev/null 2>&1
-        for _ in $(seq 1 25); do
-            pgrep -f "Claude $n.app/Contents/MacOS/Claude" >/dev/null 2>&1 || break
-            sleep 1
-        done
-        if pgrep -f "Claude $n.app/Contents/MacOS/Claude" >/dev/null 2>&1; then
-            echo "  ! still running - skipped (quit it with Cmd-Q and re-run)" >&2
-            rc=1
-            continue
+    app="$(ci_app_path "${names[$i]}")"; profile="${dirs[$i]}"; was_running=no
+    [ -d "$profile" ] || continue
+    ci_app_running "$app"; observed=$?
+    case "$observed" in
+        0) was_running=yes
+           /usr/bin/osascript -e "tell application id \"${ids[$i]}\" to quit" >/dev/null 2>&1 || { ci_error 'quit request failed'; rc=1; continue; }
+           for ((attempt=0; attempt<25; attempt++)); do
+               ci_app_running "$app"; observed=$?
+               [ "$observed" -eq 0 ] || break
+               sleep 1
+           done ;;
+        1) ;;
+        *) ci_error 'cannot inspect processes; caches unchanged'; rc=1; continue ;;
+    esac
+    ci_require_stopped "$app" || { rc=1; continue; }
+    # Also catch stock Claude sharing Personal's profile, not just the named app.
+    ci_profile_in_use "$profile"; observed=$?
+    [ "$observed" -eq 1 ] || { ci_error 'profile is in use or its state is unknown; caches unchanged'; rc=1; continue; }
+    current="$(ci_canonical_dir "$profile")" || { rc=1; continue; }
+    [ "$current" = "$profile" ] || { ci_error 'profile path changed'; rc=1; continue; }
+    for cache in 'Cache' 'Code Cache' GPUCache DawnWebGPUCache DawnGraphiteCache 'Shared Dictionary'; do
+        if [ -e "$profile/$cache" ] || [ -L "$profile/$cache" ]; then
+            rm -rf "$profile/$cache" || { ci_error 'cache removal failed'; rc=1; }
         fi
-    fi
-
-    before=$(df -k / | tail -1 | awk '{print $4}')
-    oldifs="$IFS"; IFS='|'
-    for c in $CACHES; do
-        [ -d "$d/$c" ] && rm -rf "$d/$c" && echo "  removed $c"
     done
-    IFS="$oldifs"
-    after=$(df -k / | tail -1 | awk '{print $4}')
-    echo "  reclaimed: $(( (after - before) / 1024 )) MB"
-
-    if [ "$was_running" = yes ] && [ -d "$app" ]; then
-        open -a "$app" && echo "  relaunched"
-    fi
-done < "$CONF"
-
-total_after=$(df -k / | tail -1 | awk '{print $4}')
-echo
-echo "total reclaimed: $(( (total_after - total_before) / 1024 )) MB"
-exit $rc
+    if [ "$was_running" = yes ]; then open -a "$app" || rc=1; fi
+    printf 'Claude %s: cache cleanup finished.\n' "${names[$i]}"
+done
+exit "$rc"

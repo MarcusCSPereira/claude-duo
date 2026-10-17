@@ -19,6 +19,11 @@ if [ -z "$HUE" ] || [ -z "$OUT" ]; then
     sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
 fi
+[[ "$HUE" =~ ^[0-9]{1,3}$ ]] && [ "$((10#$HUE))" -le 359 ] || {
+    echo 'error: hue must be an integer from 0 to 359' >&2
+    exit 2
+}
+umask 077
 
 SRC="/Applications/Claude.app/Contents/Resources/electron.icns"
 SWIFT_SRC="$(dirname "$0")/claude-recolor-icon.swift"
