@@ -11,6 +11,11 @@ The [current execution roadmap in Portuguese](docs/ROADMAP_PT_BR.md) lists the
 remaining work, release criteria and the steps that need account login. The
 hardened branch is still experimental; graphical two-account Code behavior has
 not been validated.
+The preferred deployment is now **the official Claude app plus one managed
+copy**, each using a different account and Desktop/Code data pair. The original
+keeps its official updater; automatic detection and rebuilding of the copy are
+planned in the roadmap. Current watchdog checks only notify. This documentation
+does not change an existing installation or disable legacy copies.
 
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own
@@ -28,15 +33,22 @@ Built on Apple Silicon with an APFS volume. On Intel, drop the `arch -arm64` pin
 
 ## Daily use
 
-| Click | App | Profile |
-|---|---|---|
-| 🟢 green | `/Applications/Claude Personal.app` | `~/Library/Application Support/Claude` |
-| 🔵 blue | `/Applications/Claude Enterprise.app` | `~/Library/Application Support/Claude-Enterprise` |
-| 🟠 coral | `/Applications/Claude.app` | **don't click it** |
+Target layout for original + one copy (graphical login validation is pending):
 
-**Keep only the coloured apps in your Dock.** Stock `Claude.app` is the *source* the
-copies are built from, plus the thing that downloads Claude updates. Launching it starts
-another instance on the personal profile — two processes on one database.
+| App | Desktop profile | Code configuration |
+|---|---|---|
+| `/Applications/Claude.app` | `~/Library/Application Support/Claude` | `~/.claude` |
+| `/Applications/Claude Trabalho.app` | `~/Library/Application Support/Claude-Trabalho` | `~/.claude-trabalho` |
+
+Use the original for one account and the copy for the other. Reserve both
+default data directories for the original; only the copy belongs in the managed
+instance configuration. The source app is never a rebuild destination.
+
+**Legacy installations:** a `Claude Personal.app` copy may share the original's
+default profile. Do not run that legacy copy and the original together. Review
+the transition before changing existing configuration, shortcuts or apps. The
+explicit default-profile reservation for the new mode is still pending; the
+parser retains support for the older deployment.
 
 ```bash
 claude-instance-check.sh      # health check
@@ -51,9 +63,11 @@ Instances are defined in `~/.config/claude-instances/instances.conf`:
 
 ```
 # name | bundle id | profile dir | icon hue | env (optional)
-Personal   | com.example.claude-personal   | ~/Library/Application Support/Claude            | 142 |
-Enterprise | com.example.claude-enterprise | ~/Library/Application Support/Claude-Enterprise | 212 | CLAUDE_CONFIG_DIR=~/.claude-work
+Trabalho | com.example.claude-trabalho | ~/Library/Application Support/Claude-Trabalho | 212 | CLAUDE_CONFIG_DIR=~/.claude-trabalho
 ```
+
+This example lists only the managed copy. The original keeps its normal
+default directories and is not listed for rebuilding.
 
 Add a line and rebuild — the icon is generated automatically from the hue:
 
@@ -213,9 +227,9 @@ built at.
 # 1. Check for drift
 claude-apps-refresh.sh --status
 
-# 2. Quit every coloured app (Cmd-Q), especially Personal sharing stock's profile
+# 2. Quit every managed copy (Cmd-Q)
 
-# 3. Launch STOCK Claude, let it update itself, then quit it (Cmd-Q)
+# 3. Let the original Claude finish its official update, then quit it (Cmd-Q)
 open -a "/Applications/Claude.app"
 
 # 4. Rebuild
@@ -228,6 +242,11 @@ claude-instance-check.sh
 
 Without updating stock Claude there is no new version to rebuild *from*, and
 step 4 just reproduces the same version.
+The builder requires observed Desktop apps/helpers, including the original,
+to be closed. The watchdog currently only checks and notifies; waiting for idle
+apps and automatically rebuilding the copy after an official update are planned,
+not installed behavior. Until reviewed transition, follow the configuration of
+your actual deployment rather than removing a legacy copy from this example.
 
 ### What a rebuild touches
 

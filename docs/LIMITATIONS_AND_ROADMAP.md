@@ -5,6 +5,10 @@ historical delivery order below. It reflects the security-first scope, defers
 the new native GUI prototype, and separates fixture evidence from the pending
 two-account graphical release gate. The numbered review remains the historical
 technical baseline described below, with implemented follow-ups recorded here.
+The current deployment preference is the unchanged official app for one account
+and one managed copy for the other. Reserve the default Desktop/Code pair for
+the original and plan verified copy rebuilds after official updates. Automatic
+rebuild orchestration and reviewed legacy transition are not implemented.
 
 ## Decision
 

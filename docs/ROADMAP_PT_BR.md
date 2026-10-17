@@ -8,16 +8,62 @@ instala ferramentas nem altera aplicativos ou perfis em uso.
 
 ## Resultado que queremos
 
-Você abre **Claude Pessoal** e **Claude Trabalho** por ícones, usa a interface do
-próprio Claude Desktop e executa tarefas no Code com a conta correspondente.
-O uso diário deve ser gráfico. Cada perfil tem pastas próprias, e as operações
-de instalação e atualização devem reconhecer falhas e preservar dados.
+Você usa **o Claude original e uma cópia**, ambos com a interface do próprio
+Claude Desktop, e executa tarefas no Code com a conta correspondente. Por
+exemplo, o original atende à conta pessoal e a cópia à conta de trabalho; a
+escolha das contas pode ser invertida. O uso diário deve ser gráfico. Cada
+perfil tem pastas próprias, e instalação e atualização devem reconhecer falhas
+e preservar dados.
 
-Hoje a implementação cria cópias modificadas do aplicativo oficial, com nomes,
-identificadores e iniciadores próprios. Essa modificação troca a assinatura
-externa por uma assinatura local; a identidade e as permissões exclusivas da
-Anthropic permanecem uma limitação. A separação completa de autenticação ainda
-precisa ser demonstrada com as contas na interface.
+O original mantém a identidade e o atualizador oficiais. A implementação atual
+permite criar cópias modificadas com nomes, identificadores e iniciadores
+próprios. Cada cópia troca a assinatura externa por uma assinatura local;
+a identidade e as permissões exclusivas da Anthropic permanecem uma limitação
+nessa cópia. A separação completa de autenticação entre original e cópia ainda
+precisa ser demonstrada na interface. Esta preferência substitui o desenho de
+duas cópias para o uso diário; a instalação existente permanece inalterada.
+
+## Topologia preferida e atualização da cópia
+
+| Aplicativo | Papel | Dados |
+|---|---|---|
+| `/Applications/Claude.app` | Uso diário de uma conta; recebe a atualização oficial | Perfil Desktop padrão e configuração Code padrão |
+| `/Applications/Claude Trabalho.app` | Uso diário da segunda conta; reconstruído pelas nossas ferramentas | Pastas Desktop e Code exclusivas da cópia |
+
+Nesse modo, reservar os diretórios padrão ao original. A configuração gerenciada
+deve listar somente a cópia; configurar o original como destino de reconstrução
+continua proibido. A política explícita de reserva do perfil padrão neste modo
+ainda precisa ser implementada: o parser atual também aceita o fluxo legado de
+uma cópia Pessoal que usa o padrão. Essa cópia legada e o original não devem
+usar esse perfil simultaneamente.
+
+O fluxo de atualização pretendido é:
+
+1. O Claude original recebe sua atualização oficial normalmente.
+2. Um observador detecta mudança da origem e identifica que a cópia precisa
+   ser reconstruída. Comparar só números de versão não comprova a origem nem
+   detecta todas as alterações de conteúdo.
+3. Aguardar o original e a cópia fecharem e confirmar uma origem verificável
+   e estável. Não encerrar tarefas automaticamente.
+4. Construir uma nova cópia em staging privado a partir do original atualizado,
+   aplicar somente as mudanças previstas e verificar assinatura e conteúdo.
+   Recusar mudanças da origem ou observações incertas durante a operação.
+5. Publicar a cópia pronta por troca atômica, preservando a anterior. Os dados
+   e a configuração da segunda conta ficam fora do bundle e não são copiados
+   do perfil do original.
+6. Informar sucesso ou falha. Abertura da nova versão e eventual migração dos
+   seus dados seguem os testes de compatibilidade; manter o bundle anterior
+   não comprova que um downgrade seja compatível.
+
+Hoje o watchdog verifica e notifica; **a reconstrução automática ainda não está
+implementada**. O construtor já prepara, verifica e publica cópias, e exige que
+os aplicativos Desktop observados estejam fechados. O trabalho adicional é
+orquestrar detecção, espera, seleção da única cópia, reconstrução e comunicação
+de falhas. A atualização do original não modifica os arquivos da cópia por si.
+
+O modelo preserva a identidade oficial no aplicativo usado pela primeira
+conta e reduz a quantidade de bundles modificados. A cópia continua sujeita às
+limitações de assinatura e autenticação já documentadas.
 
 Sua prioridade continua sendo **segurança primeiro**. O protótipo de um novo
 gerenciador nativo está adiado. O caminho atual deve passar pelos testes antes
@@ -45,8 +91,8 @@ Referências: [CI da base conferida](https://github.com/guibrbs/multi-claude-des
 |---|---|---|---|
 | 1. Instalação consistente | Instalar todas as ferramentas como uma única versão | Interrupção, adulteração e concorrência não ativam um conjunto incompleto | Nenhum login |
 | 2. Revisão de segurança e preparação | Revisar instalador, origem dos arquivos e requisitos do teste gráfico | Evidências e limites registrados; ambiente descartável preparado | Confirmar tipos de conta e recursos de que precisa |
-| 3. Duas contas na interface | Validar Desktop, Code e autenticação | Matriz gráfica aprovada para os tipos de conta declarados | Fazer os logins diretamente no Claude |
-| 4. Atualização e recuperação | Atualizar ferramentas e aplicativos sem confundir perfis | Cenários normais e de falha ensaiados; procedimento de recuperação validado | Encerrar tarefas para os ensaios combinados |
+| 3. Duas contas na interface | Validar Desktop, Code e autenticação no original e na cópia | Matriz gráfica aprovada para os tipos de conta declarados | Fazer os logins diretamente no Claude |
+| 4. Atualização e recuperação | Detectar atualização do original e reconstruir somente a cópia | Espera por aplicativos fechados, cenários de falha e recuperação ensaiados | Encerrar tarefas para os ensaios combinados |
 | 5. Dados existentes | Oferecer migração e restauração compatíveis, se quiser preservar o uso atual | Recuperação ensaiada em cópias; origem preservada e exclusões documentadas | Escolher migrar ou começar com perfis novos |
 | 6. Operação gráfica e distribuição | Instalação, verificação, atualização e remoção compreensíveis | Fluxos necessários executáveis pela interface, sem comandos no uso diário | Experimentar os fluxos de uso |
 | 7. Piloto e manutenção | Liberar uma versão identificada e acompanhar mudanças | Critérios de liberação atendidos e registro das versões testadas | Usar o piloto e comunicar problemas sem enviar segredos |
@@ -80,6 +126,9 @@ deixar versões incompatíveis misturadas se a operação for interrompida.
   automaticamente arquivos de origem incerta.
 - Projetar a transição da instalação legada sem sobrescrever scripts em uso
   antes de uma mudança revisada. Desenvolver primeiro em pastas descartáveis.
+- No modo original + cópia, reservar o perfil Desktop e Code padrão ao
+  original e validar a configuração da única cópia. Manter a origem oficial
+  fora dos destinos de publicação.
 
 **Saída:** conjunto completo e identificável, ativação testada, versão anterior
 retida e inspeção de falhas. Voltar as ferramentas não significa voltar o
@@ -97,15 +146,18 @@ Claude ou restaurar seus dados. Esta é a próxima implementação proposta.
 - Separar nos diagnósticos: origem oficial, integridade da cópia, versão,
   compatibilidade gráfica e identidade da conta observada. Cada informação
   precisa indicar quando foi verificada ou se permanece desconhecida.
-- Preparar dois perfis novos e projetos descartáveis, com destinos conferidos
-  antes de abrir o Claude. Escolher um local de teste que não confunda o Dock,
-  o registro de aplicativos do macOS ou os atalhos existentes.
+- Preparar o ensaio do original e de uma cópia com dados inventados e projetos
+  descartáveis, em ambiente de teste que não use seus perfis atuais. Definir
+  como exercitar o perfil padrão do original sem acessar o perfil pessoal em
+  uso. Conferir destinos, registro de aplicativos, Dock e atalhos antes de abrir.
 - Registrar versões exatas de macOS, arquitetura, Claude e ferramentas.
   O mínimo macOS 12 dos auxiliares não comprova suporte do próprio Claude.
 - Confirmar tipos de login necessários: pessoal, organização e SSO, se usado;
   Code local e outros recursos que você realmente pretenda utilizar.
 - Documentar a perda de identidade/permissões nas cópias e verificar possíveis
   efeitos no Chaveiro, permissões do macOS, subprocessos e recursos do Code.
+- Diferenciar as proteções do nosso iniciador da configuração efetiva do
+  original, que continua sendo lançado pelo fluxo oficial do macOS.
 - Definir um teste de continuidade entre lançamento e manutenção. O bloqueio
   atual coordena nossas ferramentas; ainda não coordena todos os lançamentos
   nem impede um programa externo de abrir o perfil.
@@ -120,6 +172,8 @@ conta errada precisam ser resolvidos antes do piloto.
 Você fará os logins dentro do próprio Claude. Os testes usarão tarefas sem
 conteúdo privado e pastas descartáveis. Não será necessário entregar senhas,
 tokens, cookies, códigos de recuperação ou exportações do Chaveiro.
+Na matriz abaixo, A e B correspondem ao original e à cópia. A conta atribuída
+ao original não depende de ser a pessoal ou a de trabalho.
 
 | Teste | Comportamento a observar |
 |---|---|
@@ -131,7 +185,7 @@ tokens, cookies, códigos de recuperação ou exportações do Chaveiro.
 | Renovar ou revogar autenticação | Efeito limitado ao perfil esperado, ou limitação registrada e modo recusado |
 | Concluir login pelo navegador e SSO, se necessário | Retorno para a janela e conta corretas |
 | Abrir pelo Dock, Finder e atalhos | Destino e perfil corretos, inclusive com cópias antigas retidas |
-| Iniciar o Claude original | Colisão com o perfil padrão reconhecida; manutenção recusada enquanto necessário |
+| Abrir original e cópia; tentar iniciar uma cópia legada com o perfil padrão | Original e cópia principal usam dados distintos; conflito legado reconhecido; manutenção recusada com aplicativos ativos |
 | Usar configuração local do Code | Shell, hooks, MCP e configurações de projeto não causam mistura inesperada |
 | Solicitar permissões e usar os recursos declarados | Funcionamento registrado para cada identidade de aplicativo |
 
@@ -154,8 +208,16 @@ o protótipo gráfico permanece adiado até essa necessidade ser demonstrada.
 
 ## 4. Atualizar e recuperar sem confundir aplicativos e perfis
 
-- Ensaiar atualização da origem oficial, reconstrução das cópias e nova
-  verificação; exigir que as tarefas terminem antes da manutenção.
+- Implementar o fluxo de detecção, espera e reconstrução da única cópia descrito
+  acima, mantendo o atualizador oficial no original. Ensaiar a atualização,
+  reconstrução e nova verificação; exigir aplicativos Desktop fechados antes
+  da manutenção, sem encerrar tarefas silenciosamente.
+- Testar original em uso, cópia em uso e os dois abertos quando a atualização
+  for detectada: mostrar atualização pendente e aguardar. Juntar eventos
+  repetidos e revalidar qual versão oficial está pronta antes de reconstruir.
+- Testar atualização da origem no meio da construção, mesma versão com conteúdo
+  diferente, falha do observador, reinício e instalações concorrentes. Recusar
+  publicação sem verificação e registrar resultado incerto para inspeção.
 - Observar o atualizador interno das cópias e alterações de identidade,
   permissões ou conteúdo. Definir um fluxo suportado sem depender de modificações
   privadas do atualizador ou de desativar verificações do macOS.
@@ -178,9 +240,13 @@ energia. Versão anterior guardada não autoriza downgrade sobre dados migrados.
 
 ## 5. Preservar os dados existentes, se houver migração
 
-- Escolher entre começar com perfis vazios ou migrar o par Desktop/Code atual.
-  Manter o perfil padrão compartilhado com o Claude original é um risco que a
-  futura migração deve resolver.
+- Escolher entre começar com perfis vazios ou reaproveitar os dados atuais.
+  O original fica com o par Desktop/Code padrão; a cópia usa um par exclusivo.
+  Ensaiar a volta ao original de dados usados por uma cópia Pessoal legada,
+  incluindo histórico, permissões, autenticação e recursos do Code.
+- Definir a desativação dos atalhos e da configuração da cópia Pessoal legada
+  para evitar que ela abra o mesmo perfil do original. Preservar arquivos e
+  dados até uma transição revisada; não remover aplicativos automaticamente.
 - Conferir o inventário de metadados reais antes de copiar. O checkpoint atual
   recusa links, atributos estendidos e outros objetos; uma recusa precisa de
   uma solução de formato revisada, sem remover metadados do perfil original.
@@ -202,8 +268,8 @@ existente é um pré-requisito parcial. Restauração ainda não está implement
 
 ## 6. Tornar a operação gráfica e preparar a distribuição
 
-- Começar com os dois ícones abrindo o próprio Claude Desktop. Avaliar a
-  necessidade de uma pequena interface de manutenção depois das validações.
+- Começar com o ícone oficial e o da única cópia. Avaliar a necessidade de uma
+  pequena interface de manutenção depois das validações.
 - Oferecer instalação, estado, atualização, inspeção de falhas e remoção por
   fluxos compreensíveis. Informar o perfil afetado e pedir encerramento das
   tarefas sem encerrá-las silenciosamente.
@@ -253,6 +319,8 @@ contagem crescente de testes não representa progresso rumo a segurança de 100%
 - Testes automáticos e análise estática aprovados no código a liberar.
 - Desktop e Code funcionando com ambas as contas na matriz declarada.
 - Retorno de login, identidade das janelas e roteamento pelo macOS validados.
+- Original preservado, perfis padrão reservados e reconstrução da cópia após
+  atualização oficial testada com aplicativos ativos, fechados e em falha.
 - Falhas e recuperação ensaiadas; migração condicionada a restauração compatível.
 - Rotina gráfica e remoção que preserve dados verificadas.
 - Evidências, origem dos artefatos e limitações disponíveis para revisão.
