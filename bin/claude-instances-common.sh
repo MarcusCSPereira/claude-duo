@@ -120,10 +120,18 @@ ci_load_config() {
     case "$config_parent/" in "$config_home/"*) ;; *) ci_error 'config must be inside this user home'; return 1 ;; esac
     ci_owned_directory_chain "$config_parent" "$config_home" || return 1
     names=(); ids=(); dirs=(); hues=(); envs=(); code_dirs=()
-    local line n bid dir hue env extra pair key value seen normalized code_dir a b
+    # Mode is config data, never an environment override. Headerless configs
+    # retain the legacy policy until an explicit, reviewed transition.
+    CI_MODE=legacy-copies
+    local mode_seen=no line n bid dir hue env extra pair key value seen normalized code_dir a b
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%%#*}"; line="$(ci_trim "$line")"
         [ -n "$line" ] || continue
+        case "$line" in @mode*)
+            [ "$mode_seen" = no ] && [ "${#names[@]}" -eq 0 ] || { ci_error 'mode must appear once before instances'; return 1; }
+            case "$line" in '@mode original-copy') CI_MODE=original-copy ;; '@mode legacy-copies') CI_MODE=legacy-copies ;; *) ci_error 'unknown instance mode'; return 1 ;; esac
+            mode_seen=yes; continue ;;
+        esac
         IFS='|' read -r n bid dir hue env extra <<<"$line"
         [ -z "${extra:-}" ] && [[ "$line" != *'|'*'|'*'|'*'|'*'|'* ]] || { ci_error 'too many config columns'; return 1; }
         n="$(ci_trim "$n")"; bid="$(ci_trim "$bid")"; dir="$(ci_trim "$dir")"
@@ -158,6 +166,16 @@ ci_load_config() {
         names+=("$n"); ids+=("$bid"); dirs+=("$dir"); hues+=("$hue"); envs+=("$normalized"); code_dirs+=("$code_dir")
     done < "$CI_CONF"
     [ "${#names[@]}" -gt 0 ] || { ci_error 'no instances configured'; return 1; }
+    if [ "$CI_MODE" = original-copy ]; then
+        [ "${#names[@]}" -eq 1 ] || { ci_error 'original-copy mode requires exactly one managed copy'; return 1; }
+        local stock_desktop stock_code
+        stock_desktop="$(ci_canonical_dir "$HOME/Library/Application Support/Claude")" && stock_code="$(ci_canonical_dir "$HOME/.claude")" || return 1
+        for a in "${!names[@]}"; do
+            if ci_paths_overlap "${dirs[$a]}" "$stock_desktop" || ci_paths_overlap "${dirs[$a]}" "$stock_code" || ci_paths_overlap "${code_dirs[$a]}" "$stock_desktop" || ci_paths_overlap "${code_dirs[$a]}" "$stock_code"; then
+                ci_error 'default Desktop and Code profiles are reserved for the original Claude'; return 1
+            fi
+        done
+    fi
     for a in "${!names[@]}"; do
         ci_paths_overlap "${dirs[$a]}" "${code_dirs[$a]}" && { ci_error 'Desktop and Code directories overlap'; return 1; }
         for b in "${!names[@]}"; do
@@ -228,6 +246,7 @@ ci_profile_in_use() {
 ci_render_launcher() {
     local idx="$1"
     printf '#!/bin/bash -p\nset -euo pipefail\numask 077\n'
+    [ "$CI_MODE" != original-copy ] || printf '# profile policy: original-copy\n'
     printf '%s\n' 'HERE="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"'
     printf 'DATA_DIR=%q\n' "${dirs[$idx]}"
     printf 'CODE_DIR=%q\n' "${code_dirs[$idx]}"
@@ -260,8 +279,9 @@ ci_compile_integrity() {
     CI_INTEGRITY_HELPER="$build_dir/integrity"; export CI_INTEGRITY_HELPER
 }
 ci_integrity_binding() {
-    local idx="$1" result
-    result="$(printf '%s\0' MCD_BUILD_CONFIG_1 "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}" | /usr/bin/shasum -a 256)" || return 1
+    local idx="$1" result policy=MCD_BUILD_CONFIG_1
+    [ "$CI_MODE" != original-copy ] || policy=MCD_BUILD_CONFIG_ORIGINAL_COPY_1
+    result="$(printf '%s\0' "$policy" "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}" | /usr/bin/shasum -a 256)" || return 1
     printf '%s\n' "${result%% *}"
 }
 ci_integrity_helper_valid() {

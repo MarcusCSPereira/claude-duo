@@ -1,15 +1,16 @@
 # Roadmap para usar duas contas no Claude Desktop e no Code
 
-Plano de execução atualizado em 17/10/2026. A base de código conferida é
-`2d37bf6b0972ee5f67916668129d45f99dfff54e`, no
+Plano atualizado em 17/10/2026, no
 [PR #1 do seu fork](https://github.com/guibrbs/multi-claude-desktop/pull/1), ainda
-em rascunho. Este documento descreve trabalho futuro; acrescentá-lo ao PR não
-instala ferramentas nem altera aplicativos ou perfis em uso.
+em rascunho. A base anterior `2d37bf6` possui as evidências históricas citadas
+abaixo. O instalador e a política de perfis agora têm testes adicionais; a
+instalação em uso continua intacta. O documento distingue as entregas em
+pastas descartáveis das etapas futuras com aplicativos e contas reais.
 
 ## Resultado que queremos
 
 Você usa **o Claude original e uma cópia**, ambos com a interface do próprio
-Claude Desktop, e executa tarefas no Code com a conta correspondente. Por
+Claude Desktop. A cópia se chama **Claude Duo**. Você executa tarefas no Code com a conta correspondente. Por
 exemplo, o original atende à conta pessoal e a cópia à conta de trabalho; a
 escolha das contas pode ser invertida. O uso diário deve ser gráfico. Cada
 perfil tem pastas próprias, e instalação e atualização devem reconhecer falhas
@@ -28,14 +29,15 @@ duas cópias para o uso diário; a instalação existente permanece inalterada.
 | Aplicativo | Papel | Dados |
 |---|---|---|
 | `/Applications/Claude.app` | Uso diário de uma conta; recebe a atualização oficial | Perfil Desktop padrão e configuração Code padrão |
-| `/Applications/Claude Trabalho.app` | Uso diário da segunda conta; reconstruído pelas nossas ferramentas | Pastas Desktop e Code exclusivas da cópia |
+| `/Applications/Claude Duo.app` | Uso diário da segunda conta; reconstruído pelas nossas ferramentas | Pastas Desktop e Code exclusivas da cópia |
 
 Nesse modo, reservar os diretórios padrão ao original. A configuração gerenciada
 deve listar somente a cópia; configurar o original como destino de reconstrução
-continua proibido. A política explícita de reserva do perfil padrão neste modo
-ainda precisa ser implementada: o parser atual também aceita o fluxo legado de
-uma cópia Pessoal que usa o padrão. Essa cópia legada e o original não devem
-usar esse perfil simultaneamente.
+continua proibido. A política explícita `@mode original-copy` já reserva os dois
+perfis padrão e exige uma única cópia. Configurações sem cabeçalho preservam o
+fluxo legado, em que uma cópia Pessoal pode usar o padrão. Essa cópia legada e
+o original não devem usar esse perfil simultaneamente. Nenhuma configuração em
+uso foi convertida automaticamente.
 
 O fluxo de atualização pretendido é:
 
@@ -77,19 +79,24 @@ de investirmos em outra interface.
 | Construção das cópias | Origem autenticada, conteúdo registrado e publicação atômica com registro de operação | Assinatura local não recupera a identidade da Anthropic |
 | Manutenção | Travamento entre ferramentas, observação nativa de processos e limpeza restrita de caches | Outros programas ainda podem iniciar ou escrever fora dessa coordenação |
 | Cópia de segurança dos perfis | Checkpoint opcional do par Desktop/Code com verificação de conteúdo | Sem restauração; formato restrito; exclui Chaveiro e projetos externos; conteúdo não criptografado |
-| Testes automatizados | 106 testes aprovados localmente e na CI em Apple Silicon e Intel | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
-| Aplicativo real em pasta descartável | 10 verificações aprovadas com Claude 2.42304.0, incluindo detecção de alteração após nova assinatura local | O executável do Claude não foi aberto e nenhuma conta foi usada nesses testes |
+| Instalador e modo original + Duo | Conjunto completo verificado, versões retidas, ativação atômica do conjunto e operação em andamento vinculada à sua versão | Integração com instalação legada e interface de manutenção pendentes |
+| Testes automatizados atuais | 137 testes aprovados localmente; resultados remotos desta etapa registrados no PR | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
+| Base anterior de CI | 106 testes aprovados em Apple Silicon e Intel no commit `2d37bf6` | Evidência histórica, anterior ao instalador |
+| Claude Duo em pasta descartável | 8 checagens reais aprovadas: origem oficial, construção, conteúdo/assinatura e reserva do perfil padrão | Observação de processos simulada; aplicativo não aberto; contas não usadas |
+| Aplicativo real na base anterior | 10 verificações aprovadas com Claude 2.42304.0, incluindo detecção de alteração após nova assinatura local | O executável do Claude não foi aberto e nenhuma conta foi usada nesses testes |
 | Instalação na sua máquina | Instalação legada preservada | As novas proteções ainda não foram instaladas nos aplicativos em uso |
 
 Referências: [CI da base conferida](https://github.com/guibrbs/multi-claude-desktop/actions/runs/39061863713),
 [evidências](evidence/integrity-maintenance.json) e
 [limitações técnicas](LIMITATIONS_AND_ROADMAP.md).
+As evidências da etapa atual, com os hashes dos arquivos testados, estão em
+[toolset-installation.json](evidence/toolset-installation.json).
 
 ## Ordem de execução
 
 | Etapa | Entrega | Quando consideraremos pronta | Sua participação |
 |---|---|---|---|
-| 1. Instalação consistente | Instalar todas as ferramentas como uma única versão | Interrupção, adulteração e concorrência não ativam um conjunto incompleto | Nenhum login |
+| 1. Instalação consistente | Implementada e testada em pastas descartáveis; falta transição da instalação em uso | Interrupção, adulteração e concorrência não ativam um conjunto incompleto | Nenhum login nos testes de código |
 | 2. Revisão de segurança e preparação | Revisar instalador, origem dos arquivos e requisitos do teste gráfico | Evidências e limites registrados; ambiente descartável preparado | Confirmar tipos de conta e recursos de que precisa |
 | 3. Duas contas na interface | Validar Desktop, Code e autenticação no original e na cópia | Matriz gráfica aprovada para os tipos de conta declarados | Fazer os logins diretamente no Claude |
 | 4. Atualização e recuperação | Detectar atualização do original e reconstruir somente a cópia | Espera por aplicativos fechados, cenários de falha e recuperação ensaiados | Encerrar tarefas para os ensaios combinados |
@@ -132,7 +139,12 @@ deixar versões incompatíveis misturadas se a operação for interrompida.
 
 **Saída:** conjunto completo e identificável, ativação testada, versão anterior
 retida e inspeção de falhas. Voltar as ferramentas não significa voltar o
-Claude ou restaurar seus dados. Esta é a próxima implementação proposta.
+Claude ou restaurar seus dados. Esta entrega está implementada em código e
+testada em pastas descartáveis. O despachante é publicado antes da referência
+ativa e deve ser compatível com o protocolo das duas versões; essas são duas
+operações atômicas separadas. Detalhes em
+[TOOLSET_INSTALLATION.md](TOOLSET_INSTALLATION.md). Instalar nos seus diretórios
+reais e converter os atalhos legados permanecem etapas separadas.
 
 ## 2. Revisar segurança e preparar o ensaio gráfico
 
@@ -340,8 +352,8 @@ ao que mudou e atualização do PR. O PR continua em rascunho enquanto os crité
 necessários estiverem pendentes. Implementação, evidência automatizada e teste
 gráfico serão registrados separadamente.
 
-Não fixamos datas antes de resolver a autenticação gráfica. O instalador é a
-próxima entrega de código; a maior incerteza é o comportamento das duas contas
+Não fixamos datas antes de resolver a autenticação gráfica. O instalador já foi
+desenvolvido e testado em ambiente descartável; a maior incerteza é o comportamento das duas contas
 e das permissões nas cópias modificadas. Sua participação será necessária nos
 logins e na avaliação do piloto. Desenvolvimento e testes automatizados usam
 dados inventados. Uma futura migração, caso escolhida, envolve copiar arquivos

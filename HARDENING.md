@@ -59,8 +59,20 @@ person using Claude to interact with the Claude Code CLI.
 - Compare launchers in the watchdog and return failure for missing apps or
   unknown process state. Pass notification text as AppleScript arguments.
 - Validate icon hue, including finite Swift numbers.
+- Support explicit `@mode original-copy`: exactly one copy, with both default
+  Desktop/Code paths reserved for the original, including physical/case aliases.
+  Policy changes affect the expected launcher and content-record binding.
+  Headerless configs preserve the legacy policy until reviewed transition.
+- Install pinned toolsets into private retained release directories, preflight
+  Bash/C, publish a compatible dispatcher and switch the active pointer by
+  atomic rename. Every dispatched operation verifies and pins one full release.
+  Read-only operation inspection recognizes post-activation failure without
+  replay. See [TOOLSET_INSTALLATION.md](docs/TOOLSET_INSTALLATION.md).
 
-Copy **all** `bin/claude-*` files when installing: the entry script now needs
+Install a complete reviewed version with the toolset installer; it does not
+replace old `~/bin` scripts or migrate installed apps/data. A reviewed legacy
+transition is still required. Manual installations must keep **all**
+`bin/claude-*` files matched: the entry script needs
 the shared library, all internal workers, all C sources and the maintenance
 header in the same directory. Rebuild/recovery, verification/watchdog, cache
 cleanup and checkpoints require macOS 12+ and Xcode Command Line Tools;

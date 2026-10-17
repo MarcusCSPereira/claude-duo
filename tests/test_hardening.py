@@ -137,6 +137,65 @@ exec "$@"
         p = self.run_script()
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
+    def set_mode(self, mode="original-copy"):
+        self.config.write_text("@mode " + mode + "\n" + self.config.read_text())
+
+    def test_original_copy_mode_builds_only_the_copy_and_preserves_stock(self):
+        self.set_mode()
+        before = {str(p.relative_to(self.source)): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}
+        self.build()
+        self.assertEqual(self.run_script("--verify").returncode, 0)
+        after = {str(p.relative_to(self.source)): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+        self.assertIn("profile policy: original-copy", (self.app / "Contents/MacOS/launcher").read_text())
+
+    def test_original_copy_mode_reserves_both_default_profiles(self):
+        for desktop, code in [(str(self.home / "Library/Application Support/Claude"), str(self.code("copy"))),
+                              (str(self.profile("copy")), str(self.home / ".claude")),
+                              (str(self.profile("copy")), "")]:
+            self.write_config([("One", "com.audit.one", desktop, "142", "CLAUDE_CONFIG_DIR=" + code if code else "")])
+            self.set_mode()
+            result = self.run_script()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reserved for the original", result.stderr)
+            self.assertFalse(self.app.exists())
+
+    def test_original_copy_mode_rejects_case_and_physical_aliases_of_defaults(self):
+        default = self.home / ".claude"
+        default.mkdir()
+        alias = self.code("alias")
+        alias.symlink_to(default, target_is_directory=True)
+        for value in [str(alias), str(default).replace(".claude", ".CLAUDE")]:
+            self.write_config([("One", "com.audit.one", str(self.profile("copy")), "142", "CLAUDE_CONFIG_DIR=" + value)])
+            self.set_mode()
+            self.assertNotEqual(self.run_script("--list").returncode, 0)
+
+    def test_original_copy_mode_requires_exactly_one_copy(self):
+        self.write_config([("One", "com.audit.one", str(self.profile("one")), "142", "CLAUDE_CONFIG_DIR=" + str(self.code("one"))),
+                           ("Two", "com.audit.two", str(self.profile("two")), "212", "CLAUDE_CONFIG_DIR=" + str(self.code("two")))])
+        self.set_mode()
+        result = self.run_script("--list")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one", result.stderr)
+
+    def test_mode_is_data_and_cannot_be_late_duplicate_or_environment_override(self):
+        original = self.config.read_text()
+        for value in ["@mode unknown\n" + original, "@mode original-copy\n@mode legacy-copies\n" + original,
+                      original + "@mode original-copy\n", "@mode $(touch marker)\n" + original]:
+            self.config.write_text(value)
+            self.assertNotEqual(self.run_script("--list").returncode, 0)
+        self.write_config([("One", "com.audit.one", str(self.profile("one")), "142", "")])
+        self.set_mode()
+        self.env["CI_MODE"] = "legacy-copies"
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+
+    def test_switching_profile_policy_requires_a_reviewed_rebuild(self):
+        self.build()
+        self.set_mode()
+        self.assertNotEqual(self.run_script("--verify").returncode, 0)
+        self.build()
+        self.assertEqual(self.run_script("--verify").returncode, 0)
+
     def test_build_and_gui_launcher_environment(self):
         self.build()
         p = self.launch()

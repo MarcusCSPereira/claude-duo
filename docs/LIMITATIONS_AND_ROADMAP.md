@@ -7,8 +7,13 @@ two-account graphical release gate. The numbered review remains the historical
 technical baseline described below, with implemented follow-ups recorded here.
 The current deployment preference is the unchanged official app for one account
 and one managed copy for the other. Reserve the default Desktop/Code pair for
-the original and plan verified copy rebuilds after official updates. Automatic
+the original and name the copy **Claude Duo**. Plan verified rebuilds after official updates. Automatic
 rebuild orchestration and reviewed legacy transition are not implemented.
+The explicit `original-copy` parser policy and versioned toolset installer are
+now implemented and tested in disposable fixtures; see
+[TOOLSET_INSTALLATION.md](TOOLSET_INSTALLATION.md). No installed tools/apps or
+profiles were migrated. This follow-up has **137 passing offline tests** locally;
+remote results for the implementation commit are recorded in the PR.
 
 ## Decision
 

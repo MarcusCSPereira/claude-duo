@@ -16,6 +16,9 @@ copy**, each using a different account and Desktop/Code data pair. The original
 keeps its official updater; automatic detection and rebuilding of the copy are
 planned in the roadmap. Current watchdog checks only notify. This documentation
 does not change an existing installation or disable legacy copies.
+The copy is named **Claude Duo**. The [versioned tool installer](docs/TOOLSET_INSTALLATION.md)
+now stages/verifies complete pinned toolsets and activates them atomically;
+it does not migrate or rename existing apps or profiles.
 
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own
@@ -38,7 +41,7 @@ Target layout for original + one copy (graphical login validation is pending):
 | App | Desktop profile | Code configuration |
 |---|---|---|
 | `/Applications/Claude.app` | `~/Library/Application Support/Claude` | `~/.claude` |
-| `/Applications/Claude Trabalho.app` | `~/Library/Application Support/Claude-Trabalho` | `~/.claude-trabalho` |
+| `/Applications/Claude Duo.app` | `~/Library/Application Support/Claude-Duo` | `~/.claude-duo` |
 
 Use the original for one account and the copy for the other. Reserve both
 default data directories for the original; only the copy belongs in the managed
@@ -47,8 +50,8 @@ instance configuration. The source app is never a rebuild destination.
 **Legacy installations:** a `Claude Personal.app` copy may share the original's
 default profile. Do not run that legacy copy and the original together. Review
 the transition before changing existing configuration, shortcuts or apps. The
-explicit default-profile reservation for the new mode is still pending; the
-parser retains support for the older deployment.
+explicit `@mode original-copy` policy now reserves the defaults and requires
+exactly one managed copy. Headerless configs retain the older deployment.
 
 ```bash
 claude-instance-check.sh      # health check
@@ -57,28 +60,25 @@ claude-apps-refresh.sh --list # what's configured
 
 ---
 
-## Adding an instance
+## Configure original + Claude Duo
 
 Instances are defined in `~/.config/claude-instances/instances.conf`:
 
 ```
 # name | bundle id | profile dir | icon hue | env (optional)
-Trabalho | com.example.claude-trabalho | ~/Library/Application Support/Claude-Trabalho | 212 | CLAUDE_CONFIG_DIR=~/.claude-trabalho
+@mode original-copy
+Duo | com.example.claude-duo | ~/Library/Application Support/Claude-Duo | 212 | CLAUDE_CONFIG_DIR=~/.claude-duo
 ```
 
 This example lists only the managed copy. The original keeps its normal
 default directories and is not listed for rebuilding.
 
-Add a line and rebuild — the icon is generated automatically from the hue:
-
-```bash
-echo 'Client | com.example.claude-client | ~/Library/Application Support/Claude-Client | 320 | CLAUDE_CONFIG_DIR=~/.claude-client' \
-  >> ~/.config/claude-instances/instances.conf
-claude-apps-refresh.sh client
-```
-
-That produces `/Applications/Claude Client.app` with a pink icon, its own bundle
-identity, and an empty profile ready to sign in to. Roughly 2 MB and a few seconds.
+The mode directive must appear once before instance rows. It rejects the
+original's default Desktop/Code paths, physical/case aliases and multiple copies.
+Existing installation/config remains unchanged until reviewed migration. A
+policy change needs a reviewed rebuild; verification rejects an older launcher's
+policy. Multiple managed copies remain a legacy mode, selected explicitly with
+`@mode legacy-copies` or retained by headerless configs.
 
 Hues: `0` red · `30` orange · `55` yellow · `142` green · `175` teal · `212` blue ·
 `275` purple · `320` pink.
@@ -89,7 +89,8 @@ The optional 5th column supports **only `CLAUDE_CONFIG_DIR=path`** in this
 subscription-account mode, with leading `~` expanded as data. Provider/API keys,
 endpoint, proxy and runtime overrides are rejected. Never store tokens here.
 Every additional Code account must use a distinct `CLAUDE_CONFIG_DIR`; otherwise
-configuration validation fails. Only one instance may use the default `~/.claude`.
+configuration validation fails. In original-copy mode the default `~/.claude`
+is reserved for the original; the legacy mode allows at most one copy to use it.
 `--list` displays variable names without revealing their values.
 
 The launcher uses privileged-mode Bash to ignore inherited startup files and
@@ -392,7 +393,9 @@ excluding `Claude Helper` processes.
 
 ## Scripts
 
-In `~/bin` (keep it on your `PATH`).
+Legacy installations expose these in `~/bin`. The versioned installer keeps
+its own complete releases; use its dispatcher to pin one release for an
+operation. Existing `~/bin` entries remain unchanged until reviewed integration.
 
 | Script | What it does |
 |---|---|
@@ -401,6 +404,7 @@ In `~/bin` (keep it on your `PATH`).
 | `claude-recolor-icon.sh` | Generate an icon master: `claude-recolor-icon.sh <hue> <out.icns>` |
 | `claude-stale-check.sh` | Watchdog: stale versions or broken identity/signature/launcher |
 | `claude-clear-caches.sh` | Quit an instance, delete only regenerable caches, relaunch |
+| `claude-toolset.sh` | Reviewed installer entry; verify a pinned package and activate complete toolsets; see [protocol](docs/TOOLSET_INSTALLATION.md) |
 
 ---
 
