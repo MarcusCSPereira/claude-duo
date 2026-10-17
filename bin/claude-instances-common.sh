@@ -33,15 +33,92 @@ ci_canonical_dir() (
     physical="$(cd -- "$path" && pwd -P)" || exit 1
     printf '%s%s\n' "${physical%/}" "$suffix"
 )
+ci_no_allow_acl() {
+    local snapshot line first=yes
+    snapshot="$(LC_ALL=C /bin/ls -lde "$1")" || return 1
+    while IFS= read -r line; do
+        if [ "$first" = yes ]; then first=no; continue; fi
+        # Fail closed on custom allow ACLs, including inherited grants. Standard
+        # macOS deny-delete ACLs are fine. Do not attempt to interpret principals.
+        if [[ "$line" =~ [[:space:]]allow[[:space:]] ]]; then ci_error 'custom allow ACL; review permissions first'; return 1; fi
+        if [[ "$line" =~ ^[[:space:]]*[0-9]+:.*[[:space:]]deny[[:space:]] ]]; then continue; fi
+        ci_error 'custom allow ACL or unknown permission metadata; review permissions first'; return 1
+    done <<<"$snapshot"
+}
+ci_owned_directory_chain() {
+    local path="$1" ci_home_path="$2" mode
+    while [ ! -d "$path" ]; do path="${path%/*}"; done
+    while :; do
+        [ -d "$path" ] && [ ! -L "$path" ] && [ -O "$path" ] || { ci_error 'data directory ancestor must be owned by this user and not a symlink'; return 1; }
+        mode="$(/usr/bin/stat -f '%Lp' "$path")" || return 1
+        [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [ "$((8#$mode & 0022))" -eq 0 ] || { ci_error 'data directory ancestor is writable by another user'; return 1; }
+        ci_no_allow_acl "$path" || return 1
+        [ "$path" != "$ci_home_path" ] || return 0
+        path="${path%/*}"
+        case "$path/" in "$ci_home_path/"*) ;; *) ci_error 'directory escaped home'; return 1 ;; esac
+    done
+}
 ci_safe_data_dir() {
-    local path="$1" home
-    home="$(ci_canonical_dir "$HOME")" || return 1
-    case "$path" in ''|/|"$home"|"$CI_APPS"|"$CI_APPS/"*|*.app|*.app/*)
-        ci_error 'refusing root, home or application bundle as a data directory'; return 1 ;;
+    local path="$1" kind="$2" ci_home_path leaf relative base LC_ALL=C
+    ci_home_path="$(ci_canonical_dir "$HOME")" || return 1
+    case "$path" in *.app|*.app/*) ci_error 'application bundles cannot be data directories'; return 1 ;; esac
+    # Only managed locations and the existing flat Claude profile layout.
+    # An arbitrary home/system directory must never be chmod'ed or cleaned.
+    base="$ci_home_path/Library/Application Support/Multi Claude Desktop/Profiles"
+    case "$path" in "$base/"*)
+        relative="${path#"$base/"}"; leaf="${relative%%/*}"
+        [[ "$leaf" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]] && [ "$relative" = "$leaf/$kind" ] || { ci_error 'invalid managed profile location'; return 1; } ;;
+    *)
+        case "$kind:$path" in
+            "desktop:$ci_home_path/Library/Application Support/Claude"|"code:$ci_home_path/.claude") ;;
+            "desktop:$ci_home_path/Library/Application Support/Claude-"*)
+                leaf="${path#"$ci_home_path/Library/Application Support/Claude-"}"
+                [ -n "$leaf" ] && [[ "$leaf" != */* ]] || { ci_error 'legacy desktop profile must be a flat Claude-* directory'; return 1; } ;;
+            "code:$ci_home_path/.claude-"*)
+                leaf="${path#"$ci_home_path/.claude-"}"
+                [ -n "$leaf" ] && [[ "$leaf" != */* ]] || { ci_error 'legacy Code profile must be a flat .claude-* directory'; return 1; } ;;
+            *) ci_error 'data directory must use a managed location or the existing Claude profile layout inside home'; return 1 ;;
+        esac ;;
     esac
+    [[ "${leaf:-}" != *[!\ -~]* ]] || { ci_error 'legacy profile suffix must be printable ASCII; use managed UUID locations for new profiles'; return 1; }
+    ci_owned_directory_chain "$path" "$ci_home_path"
+}
+ci_paths_overlap() {
+    local left right
+    left="$(ci_lower "$1")"; right="$(ci_lower "$2")"
+    case "$left/" in "$right/"*) return 0 ;; esac
+    case "$right/" in "$left/"*) return 0 ;; esac
+    return 1
+}
+ci_prepare_data_dir() {
+    local path="$1" kind="$2" current
+    current="$(ci_canonical_dir "$path")" && [ "$current" = "$path" ] && ci_safe_data_dir "$path" "$kind" || { ci_error 'data directory changed; refusing mutation'; return 1; }
+    ci_prepare_private_directory "$path"
+}
+ci_prepare_private_directory() {
+    local path="$1" current ci_home_path
+    ci_home_path="$(ci_canonical_dir "$HOME")" || return 1
+    current="$(ci_canonical_dir "$path")" && [ "$current" = "$path" ] || { ci_error 'private directory changed or contains a symlink'; return 1; }
+    case "$path/" in "$ci_home_path/"*) [ "$path" != "$ci_home_path" ] || return 1 ;; *) return 1 ;; esac
+    ci_owned_directory_chain "$path" "$ci_home_path" || return 1
+    /bin/mkdir -p "$path" || return 1
+    current="$(ci_canonical_dir "$path")" && [ "$current" = "$path" ] && ci_owned_directory_chain "$path" "$ci_home_path" || return 1
+    /bin/chmod 700 "$path"
 }
 ci_load_config() {
-    [ -f "$CI_CONF" ] && [ ! -L "$CI_CONF" ] || { ci_error 'missing or symlinked instance config'; return 1; }
+    local LC_ALL=C current_uid
+    current_uid="$(/usr/bin/id -u)" && [[ "$current_uid" =~ ^[0-9]+$ ]] && [ "$current_uid" != 0 ] || { ci_error 'cannot establish a non-root user; do not run instance tools with sudo'; return 1; }
+    CI_USER="$(/usr/bin/id -un)" && [ -n "$CI_USER" ] || { ci_error 'cannot determine current user'; return 1; }
+    [ -f "$CI_CONF" ] && [ ! -L "$CI_CONF" ] && [ -O "$CI_CONF" ] || { ci_error 'instance config must be a regular file owned by this user, not a symlink'; return 1; }
+    local mode
+    mode="$(/usr/bin/stat -f '%Lp' "$CI_CONF")" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [ "$((8#$mode & 0022))" -eq 0 ] || { ci_error 'instance config is writable by another user'; return 1; }
+    ci_no_allow_acl "$CI_CONF" || return 1
+    local config_parent config_home
+    config_parent="$(cd -- "${CI_CONF%/*}" && pwd -P)" || return 1
+    config_home="$(ci_canonical_dir "$HOME")" || return 1
+    case "$config_parent/" in "$config_home/"*) ;; *) ci_error 'config must be inside this user home'; return 1 ;; esac
+    ci_owned_directory_chain "$config_parent" "$config_home" || return 1
     names=(); ids=(); dirs=(); hues=(); envs=(); code_dirs=()
     local line n bid dir hue env extra pair key value seen normalized code_dir a b
     while IFS= read -r line || [ -n "$line" ]; do
@@ -54,8 +131,8 @@ ci_load_config() {
         [[ "$n" =~ ^[A-Za-z][A-Za-z0-9_-]{0,63}$ ]] || { ci_error 'invalid instance name'; return 1; }
         [[ "$bid" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] && [ "$(ci_lower "$bid")" != com.anthropic.claudefordesktop ] || { ci_error 'invalid or reserved bundle id'; return 1; }
         [[ "$hue" =~ ^[0-9]{1,3}$ ]] && [ "$((10#$hue))" -le 359 ] || { ci_error 'hue must be an integer from 0 to 359'; return 1; }
-        dir="$(ci_canonical_dir "$dir")" && ci_safe_data_dir "$dir" || return 1
-        code_dir="$(ci_canonical_dir "$HOME/.claude")" || return 1
+        dir="$(ci_canonical_dir "$dir")" && ci_safe_data_dir "$dir" desktop || return 1
+        code_dir=""
         seen='|'; normalized=""
         local pairs=()
         IFS=';' read -ra pairs <<<"$env"
@@ -64,29 +141,35 @@ ci_load_config() {
             [[ "$pair" == *=* ]] || { ci_error 'environment entry must be KEY=VALUE'; return 1; }
             key="${pair%%=*}"; value="${pair#*=}"
             [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { ci_error 'invalid environment variable name'; return 1; }
-            case "$key" in HOME|PATH|USER|LOGNAME|SHELL|CODEX_HOME|BASH_ENV|ENV|IFS|CDPATH|SHELLOPTS|BASHOPTS|DYLD_*|LD_*|NODE_OPTIONS)
-                ci_error 'unsafe environment override'; return 1 ;;
+            case "$key" in CLAUDE_CONFIG_DIR) ;;
+                *) ci_error 'subscription profiles only allow CLAUDE_CONFIG_DIR; provider, credential and runtime overrides are refused'; return 1 ;;
             esac
             [[ "$seen" != *"|$key|"* ]] || { ci_error 'duplicate environment variable'; return 1; }
             seen="$seen$key|"; value="$(ci_expand "$value")" || return 1
             case "$key" in CLAUDE_CONFIG_DIR)
-                value="$(ci_canonical_dir "$value")" && ci_safe_data_dir "$value" || return 1
+                value="$(ci_canonical_dir "$value")" && ci_safe_data_dir "$value" code || return 1
                 code_dir="$value" ;;
             esac
             normalized="${normalized}${normalized:+;}$key=$value"
         done
+        if [ -z "$code_dir" ]; then
+            code_dir="$(ci_canonical_dir "$HOME/.claude")" && ci_safe_data_dir "$code_dir" code || return 1
+        fi
         names+=("$n"); ids+=("$bid"); dirs+=("$dir"); hues+=("$hue"); envs+=("$normalized"); code_dirs+=("$code_dir")
     done < "$CI_CONF"
     [ "${#names[@]}" -gt 0 ] || { ci_error 'no instances configured'; return 1; }
     for a in "${!names[@]}"; do
+        ci_paths_overlap "${dirs[$a]}" "${code_dirs[$a]}" && { ci_error 'Desktop and Code directories overlap'; return 1; }
         for b in "${!names[@]}"; do
             [ "$a" -lt "$b" ] || continue
             [ "$(ci_lower "${names[$a]}")" != "$(ci_lower "${names[$b]}")" ] || { ci_error 'duplicate instance name'; return 1; }
             [ "$(ci_lower "${ids[$a]}")" != "$(ci_lower "${ids[$b]}")" ] || { ci_error 'duplicate bundle id'; return 1; }
-            [ "$(ci_lower "${dirs[$a]}")" != "$(ci_lower "${dirs[$b]}")" ] || { ci_error 'instances share a profile (including case aliases)'; return 1; }
-            [ "$(ci_lower "${code_dirs[$a]}")" != "$(ci_lower "${code_dirs[$b]}")" ] || { ci_error 'instances share a Claude Code config directory; set CLAUDE_CONFIG_DIR per account'; return 1; }
+            if ci_paths_overlap "${dirs[$a]}" "${dirs[$b]}" || ci_paths_overlap "${code_dirs[$a]}" "${code_dirs[$b]}" || ci_paths_overlap "${dirs[$a]}" "${code_dirs[$b]}" || ci_paths_overlap "${code_dirs[$a]}" "${dirs[$b]}"; then
+                ci_error 'profile directories overlap (including nested paths and case aliases); use separate Desktop and Code directories'; return 1
+            fi
         done
     done
+    return 0
 }
 ci_app_path() { printf '%s/Claude %s.app\n' "$CI_APPS" "$1"; }
 ci_version() { "$CI_PB" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
@@ -132,24 +215,29 @@ ci_profile_in_use() {
     return 1
 }
 ci_render_launcher() {
-    local idx="$1" pair key value
-    printf '#!/bin/bash\nset -euo pipefail\numask 077\n'
-    printf 'HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"\n'
+    local idx="$1"
+    printf '#!/bin/bash -p\nset -euo pipefail\numask 077\n'
+    printf '%s\n' 'HERE="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"'
     printf 'DATA_DIR=%q\n' "${dirs[$idx]}"
-    printf 'mkdir -p "$DATA_DIR"\nchmod 700 "$DATA_DIR"\n'
-    printf 'unset CLAUDE_CONFIG_DIR\n'
-    local pairs=()
-    IFS=';' read -ra pairs <<<"${envs[$idx]}"
-    for pair in "${pairs[@]-}"; do
-        [ -n "$pair" ] || continue
-        key="${pair%%=*}"; value="${pair#*=}"
-        printf 'export %s=%q\n' "$key" "$value"
-    done
-    printf 'for ARG in "$@"; do\n  case "$ARG" in --user-data-dir|--user-data-dir=*) echo "profile override refused" >&2; exit 1 ;; esac\ndone\n'
+    printf 'CODE_DIR=%q\n' "${code_dirs[$idx]}"
+    # This mode supports launching from Finder/Dock, not arbitrary CLI flags or
+    # URL callbacks. Refuse every argument until a specific input is supported.
+    printf '[ "$#" -eq 0 ] || { echo "launcher arguments are not supported" >&2; exit 1; }\n'
+    # Do not silently strip a required corporate proxy and connect directly.
+    printf '%s\n' '[ -z "${HTTPS_PROXY:-}${HTTP_PROXY:-}${ALL_PROXY:-}${https_proxy:-}${http_proxy:-}${all_proxy:-}" ] || { echo "proxy environment detected; this subscription launcher does not support proxy overrides; use your approved Claude setup" >&2; exit 1; }'
+    printf '[ -d "$DATA_DIR" ] && [ ! -L "$DATA_DIR" ] && [ -d "$CODE_DIR" ] && [ ! -L "$CODE_DIR" ] || { echo "profile directories missing or changed; rebuild required" >&2; exit 1; }\n'
+    printf '[ "$(cd "$DATA_DIR" && pwd -P)" = "$DATA_DIR" ] && [ "$(cd "$CODE_DIR" && pwd -P)" = "$CODE_DIR" ] || { echo "profile path changed; refusing launch" >&2; exit 1; }\n'
+    declare -f ci_error ci_no_allow_acl ci_owned_directory_chain
+    printf 'ci_owned_directory_chain "$DATA_DIR" %q\nci_owned_directory_chain "$CODE_DIR" %q\n' "$(ci_canonical_dir "$HOME")" "$(ci_canonical_dir "$HOME")"
+    printf '/bin/chmod 700 "$DATA_DIR" "$CODE_DIR"\n'
+    # /bin/bash -p ignores inherited BASH_ENV and exported functions. env -i
+    # prevents provider/credential/loader values reaching the child. HOME stays
+    # the actual configured user's home; no token is written into the launcher.
+    printf 'exec /usr/bin/env -i HOME=%q USER=%q LOGNAME=%q PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh LANG=en_US.UTF-8 CLAUDE_CONFIG_DIR="$CODE_DIR" ' "$HOME" "$CI_USER" "$CI_USER"
     if [ "$(uname -m)" = arm64 ]; then
-        printf 'exec /usr/bin/arch -arm64 "$HERE/Claude" --user-data-dir="$DATA_DIR" "$@"\n'
+        printf '/usr/bin/arch -arm64 "$HERE/Claude" --user-data-dir="$DATA_DIR"\n'
     else
-        printf 'exec "$HERE/Claude" --user-data-dir="$DATA_DIR" "$@"\n'
+        printf '"$HERE/Claude" --user-data-dir="$DATA_DIR"\n'
     fi
 }
 ci_verify_one() {

@@ -29,7 +29,7 @@ for i in "${!names[@]}"; do
     ci_profile_in_use "$profile"; observed=$?
     [ "$observed" -eq 1 ] || { ci_error 'profile is in use or its state is unknown; caches unchanged'; rc=1; continue; }
     current="$(ci_canonical_dir "$profile")" || { rc=1; continue; }
-    [ "$current" = "$profile" ] || { ci_error 'profile path changed'; rc=1; continue; }
+    [ "$current" = "$profile" ] && ci_safe_data_dir "$profile" desktop || { ci_error 'profile path changed or is unsafe'; rc=1; continue; }
     for cache in 'Cache' 'Code Cache' GPUCache DawnWebGPUCache DawnGraphiteCache 'Shared Dictionary'; do
         if [ -e "$profile/$cache" ] || [ -L "$profile/$cache" ]; then
             rm -rf "$profile/$cache" || { ci_error 'cache removal failed'; rc=1; }

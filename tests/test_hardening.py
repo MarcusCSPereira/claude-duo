@@ -1,7 +1,7 @@
 """Regression tests in fixtures, never against real apps/accounts.
 
 Uses macOS Bash/PlistBuddy/plutil; signatures and process observations are mocked.
-No HOME override, no network, and no registration of fixture apps.
+No change to the caller's HOME, no network, no registration of fixture apps.
 """
 import hashlib
 import os
@@ -25,6 +25,7 @@ class HardeningTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.home.mkdir()
+        (self.home / "Library/Application Support").mkdir(parents=True)
         self.source = self.apps / "Claude.app"
         (self.source / "Contents/MacOS").mkdir(parents=True)
         (self.source / "Contents/Resources").mkdir()
@@ -39,23 +40,29 @@ class HardeningTests(unittest.TestCase):
         }
         (self.source / "Contents/Info.plist").write_bytes(plistlib.dumps(self.info))
         binary = self.source / "Contents/MacOS/Claude"
-        binary.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\nprintf "CONFIG=%s VALUE=%s\\n" "${CLAUDE_CONFIG_DIR:-}" "${AUDIT_VALUE:-}"\n')
+        binary.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\nprintf "CONFIG=%s VALUE=%s\\n" "${CLAUDE_CONFIG_DIR:-}" "${ANTHROPIC_API_KEY:-}"\n')
         binary.chmod(0o755)
-        self.config = self.root / "instances.conf"
+        self.config = self.home / "instances.conf"
         self.env = os.environ.copy()
         self.env.update({
             "PATH": str(self.bin) + ":" + self.env["PATH"],
             "CLAUDE_INSTANCES_CONF": str(self.config),
             "MULTI_CLAUDE_TEST_HOME": str(self.home),
         })
+        # Host proxy settings are irrelevant to offline fixture children. The
+        # explicit inherited-proxy regression below supplies synthetic values.
+        for key in ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"]:
+            self.env.pop(key, None)
         for src in (REPO / "bin").glob("*.sh"):
             code = src.read_text().replace("$HOME", "$MULTI_CLAUDE_TEST_HOME")
             code = code.replace("/Applications", str(self.apps))
             code = code.replace("CI_PB=/usr/libexec/PlistBuddy", "CI_PB=" + str(self.bin / "pb"))
             code = code.replace("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "/usr/bin/true")
             code = code.replace("/usr/bin/osascript", str(self.bin / "osascript"))
+            code = code.replace("/usr/bin/id", str(self.bin / "id"))
             (self.bin / src.name).write_text(code)
         mocks = {
+            "id": '#!/bin/bash\n[ "${MOCK_ID_FAIL:-}" != 1 ] || exit 99\nif [[ "$1" == -u && "${MOCK_ROOT:-}" == 1 ]]; then echo 0; else exec /usr/bin/id "$@"; fi\n',
             "ps": '''#!/bin/bash
 [ "${MOCK_PS_FAIL:-}" != 1 ] || exit 99
 if [ "$1" = -Aww ]; then
@@ -95,14 +102,24 @@ exec /bin/mv "$@"
             p.chmod(0o755)
         self.write_config()
 
+    def profile(self, label):
+        return self.home / "Library/Application Support" / ("Claude-" + label)
+
+    def code(self, label):
+        return self.home / (".claude-" + label)
+
     def write_config(self, rows=None):
         if rows is None:
-            rows = [("One", "com.audit.one", str(self.home / "profile one"), "142", "CLAUDE_CONFIG_DIR=" + str(self.home / "code one"))]
+            rows = [("One", "com.audit.one", str(self.profile('profile one')), "142", "CLAUDE_CONFIG_DIR=" + str(self.code('code one')))]
         self.config.write_text("\n".join(" | ".join(row) for row in rows) + "\n")
 
     def run_script(self, *args, script="claude-apps-refresh.sh"):
         return subprocess.run(["/bin/bash", str(self.bin / script), *args], env=self.env,
                               text=True, capture_output=True, timeout=20)
+
+    def launch(self, *args):
+        return subprocess.run([str(self.app / "Contents/MacOS/launcher"), *args],
+                              env=self.env, cwd=self.root, text=True, capture_output=True, timeout=10)
 
     @property
     def app(self):
@@ -114,41 +131,98 @@ exec /bin/mv "$@"
 
     def test_build_and_gui_launcher_environment(self):
         self.build()
-        p = subprocess.run(["/bin/bash", str(self.app / "Contents/MacOS/launcher")],
-                           env=self.env, text=True, capture_output=True, timeout=10)
+        p = self.launch()
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("--user-data-dir=" + str(self.home / "profile one"), p.stdout)
-        self.assertIn("CONFIG=" + str(self.home / "code one"), p.stdout)
+        self.assertIn("--user-data-dir=" + str(self.profile('profile one')), p.stdout)
+        self.assertIn("CONFIG=" + str(self.code('code one')), p.stdout)
         self.assertEqual(self.run_script("--verify").returncode, 0)
-        for path in [self.home / "profile one", self.home / "code one"]:
+        for path in [self.profile('profile one'), self.code('code one')]:
             self.assertEqual(path.stat().st_mode & 0o777, 0o700)
 
     def test_invalid_names_and_traversal_rejected_before_mutation(self):
         for name in ["X/../../victim", "bad name", "../Claude", "A$(touch marker)", "-bad"]:
             with self.subTest(name=name):
-                self.write_config([(name, "com.audit.one", str(self.home / "p"), "142", "")])
+                self.write_config([(name, "com.audit.one", str(self.profile('p')), "142", "")])
                 self.assertNotEqual(self.run_script().returncode, 0)
                 self.assertFalse(self.app.exists())
+
+    def test_elevated_invocation_is_refused(self):
+        self.env["MOCK_ROOT"] = "1"
+        p = self.run_script()
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("root", p.stderr)
+        self.assertFalse(self.app.exists())
+
+    def test_unknown_user_identity_is_refused(self):
+        self.env["MOCK_ID_FAIL"] = "1"
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertFalse(self.app.exists())
 
     def test_invalid_environment_names_rejected(self):
         marker = self.root / "marker"
         for env in ["X$(touch " + str(marker) + ")=ok", "BASH_ENV=bad", "DYLD_INSERT_LIBRARIES=bad", "PATH=/bad", "HOME=/bad", "NODE_OPTIONS=bad", "A=one;A=two"]:
             with self.subTest(env=env):
-                self.write_config([("One", "com.audit.one", str(self.home / "p"), "142", env)])
+                self.write_config([("One", "com.audit.one", str(self.profile('p')), "142", env)])
                 self.assertNotEqual(self.run_script().returncode, 0)
                 self.assertFalse(marker.exists())
 
+    def test_provider_credentials_and_runtime_overrides_are_refused(self):
+        for key in ["ELECTRON_RUN_AS_NODE", "ELECTRON_ENABLE_LOGGING", "ANTHROPIC_API_KEY",
+                    "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"]:
+            with self.subTest(key=key):
+                self.write_config([("One", "com.audit.one", str(self.profile('p')), "142", key + "=synthetic-canary")])
+                self.assertNotEqual(self.run_script().returncode, 0)
+                self.assertFalse(self.app.exists())
+
+    def test_launcher_does_not_inherit_provider_or_runtime_environment(self):
+        self.build()
+        (self.app / "Contents/MacOS/Claude").write_text('''#!/bin/bash
+printf '%s|%s|%s|%s|%s|%s\\n' "${ANTHROPIC_API_KEY:-}" "${ANTHROPIC_BASE_URL:-}" "${ELECTRON_RUN_AS_NODE:-}" "${NODE_OPTIONS:-}" "${HTTPS_PROXY:-}" "$PATH"
+''')
+        for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS"]:
+            self.env[key] = "synthetic-canary"
+        p = self.launch()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout.strip(), "|||||/usr/bin:/bin:/usr/sbin:/sbin")
+
+    def test_inherited_proxy_causes_refusal_instead_of_silent_bypass(self):
+        self.build()
+        for key in ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"]:
+            self.env[key] = "http://synthetic.invalid:8080"
+            p = self.launch()
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn("proxy environment detected", p.stderr)
+            self.assertNotIn("synthetic.invalid", p.stderr)
+            self.assertEqual(p.stdout, "")
+            del self.env[key]
+
+    def test_launcher_ignores_inherited_bash_startup_file(self):
+        self.build()
+        marker = self.root / "startup-executed"
+        startup = self.root / "startup.sh"
+        startup.write_text('touch "' + str(marker) + '"\n')
+        self.env["BASH_ENV"] = str(startup)
+        self.assertEqual(self.launch().returncode, 0)
+        self.assertFalse(marker.exists())
+
+    def test_all_caller_arguments_are_refused(self):
+        self.build()
+        for arg in ["--no-sandbox", "--inspect=9229", "--remote-debugging-port=9222",
+                    "--proxy-server=example.invalid", "--user-data-dir=/other", "claude://callback"]:
+            with self.subTest(arg=arg):
+                self.assertNotEqual(self.launch(arg).returncode, 0)
+
     def test_environment_values_are_data_and_list_redacts_them(self):
         marker = self.root / "marker"
-        value = "$(touch " + str(marker) + ")"
-        self.write_config([("One", "com.audit.one", str(self.home / "p"), "142", "AUDIT_VALUE=" + value)])
+        value = str(self.code("$(touch marker)"))
+        self.write_config([("One", "com.audit.one", str(self.profile('p')), "142", "CLAUDE_CONFIG_DIR=" + value)])
         self.build()
-        p = subprocess.run(["/bin/bash", str(self.app / "Contents/MacOS/launcher")], env=self.env, capture_output=True, text=True)
+        p = self.launch()
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn(value, p.stdout)
         self.assertFalse(marker.exists())
         listed = self.run_script("--list")
-        self.assertIn("AUDIT_VALUE", listed.stdout)
+        self.assertIn("CLAUDE_CONFIG_DIR", listed.stdout)
         self.assertNotIn(value, listed.stdout)
 
     def test_verification_never_executes_tampered_launcher(self):
@@ -168,27 +242,105 @@ exec /bin/mv "$@"
         self.assertNotEqual(self.run_script("--verify").returncode, 0)
 
     def test_duplicates_and_alias_profiles_rejected(self):
-        real = self.home / "real"
+        real = self.profile('real')
         real.mkdir()
-        alias = self.home / "alias"
+        alias = self.profile('alias')
         alias.symlink_to(real, target_is_directory=True)
         variants = [
-            ("Two", "com.audit.one", str(self.home / "other"), str(self.home / "c2")),
-            ("one", "com.audit.two", str(self.home / "other"), str(self.home / "c2")),
-            ("Two", "com.audit.two", str(real), str(self.home / "c2")),
-            ("Two", "com.audit.two", str(alias), str(self.home / "c2")),
-            ("Two", "com.audit.two", str(real) + "/.", str(self.home / "c2")),
-            ("Two", "com.audit.two", str(self.home / "other"), str(self.home / "c1")),
+            ("Two", "com.audit.one", str(self.profile('other')), str(self.code('c2'))),
+            ("one", "com.audit.two", str(self.profile('other')), str(self.code('c2'))),
+            ("Two", "com.audit.two", str(real), str(self.code('c2'))),
+            ("Two", "com.audit.two", str(alias), str(self.code('c2'))),
+            ("Two", "com.audit.two", str(real) + "/.", str(self.code('c2'))),
+            ("Two", "com.audit.two", str(self.profile('other')), str(self.code('c1'))),
         ]
         for name, bid, profile, code in variants:
-            self.write_config([("One", "com.audit.one", str(real), "142", "CLAUDE_CONFIG_DIR=" + str(self.home / "c1")),
+            self.write_config([("One", "com.audit.one", str(real), "142", "CLAUDE_CONFIG_DIR=" + str(self.code('c1'))),
                                (name, bid, profile, "212", "CLAUDE_CONFIG_DIR=" + code)])
             self.assertNotEqual(self.run_script().returncode, 0)
 
     def test_two_default_code_directories_rejected(self):
-        self.write_config([("One", "com.audit.one", str(self.home / "p1"), "142", ""),
-                           ("Two", "com.audit.two", str(self.home / "p2"), "212", "")])
+        self.write_config([("One", "com.audit.one", str(self.profile('p1')), "142", ""),
+                           ("Two", "com.audit.two", str(self.profile('p2')), "212", "")])
         self.assertNotEqual(self.run_script().returncode, 0)
+
+    def test_system_arbitrary_and_nested_directories_are_refused(self):
+        for path in ["/etc", "/private/tmp", str(self.home / "Documents"),
+                     str(self.profile('p') / 'nested'), str(self.code('p')),
+                     str(self.profile('bundle.app'))]:
+            with self.subTest(path=path):
+                self.write_config([("One", "com.audit.one", path, "142", "")])
+                self.assertNotEqual(self.run_script("--list").returncode, 0)
+                self.assertFalse(self.app.exists())
+        for path in [str(self.profile('p')), str(self.code('p') / 'nested'), "/etc"]:
+            with self.subTest(code=path):
+                self.write_config([("One", "com.audit.one", str(self.profile('p')), "142", "CLAUDE_CONFIG_DIR=" + path)])
+                self.assertNotEqual(self.run_script("--list").returncode, 0)
+
+    def test_managed_uuid_locations_and_cross_type_policy(self):
+        base = self.home / "Library/Application Support/Multi Claude Desktop/Profiles"
+        ids = ["439b7ef2-faf3-47fb-bc65-366c30a406cb", "edc1f5bd-1b3f-4c1c-beba-d677d0fb3a21"]
+        rows = [(name, "com.audit." + name, str(base / uid / "desktop"), "142", "CLAUDE_CONFIG_DIR=" + str(base / uid / "code"))
+                for name, uid in zip(["One", "Two"], ids)]
+        self.write_config(rows)
+        self.build()
+        self.assertEqual(self.run_script("--verify").returncode, 0)
+        for suffix in ["code", "desktop/nested", "../desktop", "desktop.app"]:
+            bad = list(rows[0])
+            bad[2] = str(base / ids[0] / suffix)
+            self.write_config([bad])
+            self.assertNotEqual(self.run_script("--list").returncode, 0, suffix)
+
+    def test_writable_config_and_profile_ancestors_are_refused(self):
+        self.config.chmod(0o666)
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+        self.config.chmod(0o600)
+        self.profile('profile one').mkdir()
+        self.profile('profile one').chmod(0o777)
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.profile('profile one').chmod(0o700)
+        self.home.chmod(0o777)
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+
+    def test_custom_allow_acls_are_refused_and_default_deny_acl_is_allowed(self):
+        profile = self.profile('profile one')
+        profile.mkdir(mode=0o700)
+        subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(profile)], check=True)
+        self.assertEqual(self.run_script("--list").returncode, 0)
+        subprocess.run(["/bin/chmod", "+a", "everyone allow add_file", str(profile)], check=True)
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+        subprocess.run(["/bin/chmod", "-N", str(profile)], check=True)
+        subprocess.run(["/bin/chmod", "+a", "everyone allow write", str(self.config)], check=True)
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+
+    def test_unicode_legacy_aliases_are_rejected_before_creation(self):
+        for suffix in ["caf\u00e9", "cafe\u0301"]:
+            self.write_config([("One", "com.audit.one", str(self.profile(suffix)), "142", "")])
+            self.assertNotEqual(self.run_script("--list").returncode, 0)
+            self.assertFalse(self.profile(suffix).exists())
+
+    def test_launch_refuses_replaced_profile_or_writable_ancestor(self):
+        self.build()
+        profile = self.profile('profile one')
+        profile.rmdir()
+        replacement = self.profile('other')
+        replacement.mkdir()
+        profile.symlink_to(replacement, target_is_directory=True)
+        self.assertNotEqual(self.launch().returncode, 0)
+        profile.unlink()
+        profile.mkdir(mode=0o700)
+        profile.parent.chmod(0o777)
+        self.assertNotEqual(self.launch().returncode, 0)
+
+    def test_overlap_check_includes_cross_type_nesting_and_case(self):
+        # Directly exercise the graph guard even though the location policy
+        # already rejects most nested/cross-type paths before this point.
+        common = str(self.bin / "claude-instances-common.sh")
+        for left, right, expected in [("/a/P", "/a/p/child", 0), ("/a/p", "/a/prefix", 1),
+                                      ("/a/p/code", "/a/p", 0), ("/a/one", "/a/two", 1)]:
+            p = subprocess.run(["/bin/bash", "-c", 'source "$1"; ci_paths_overlap "$2" "$3"',
+                                "test", common, left, right], capture_output=True, env=self.env)
+            self.assertEqual(p.returncode, expected)
 
     def test_source_and_gatekeeper_failure_leave_apps_untouched(self):
         self.build()
@@ -244,14 +396,36 @@ exec /bin/mv "$@"
         self.assertNotEqual(self.run_script().returncode, 0)
         self.assertTrue(lock.is_dir())
 
+    def test_symlinked_icon_directory_and_icon_master_are_refused(self):
+        icons = self.home / ".local/share/claude-instances"
+        icons.parent.mkdir(parents=True)
+        victim = self.root / "victim"
+        victim.mkdir()
+        icons.symlink_to(victim, target_is_directory=True)
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual(list(victim.iterdir()), [])
+        icons.unlink()
+        icons.mkdir(mode=0o700)
+        marker = victim / "marker"
+        (icons / "one.icns").symlink_to(marker)
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertFalse(marker.exists())
+
+    def test_writable_icon_ancestor_is_refused_before_publication(self):
+        shared = self.home / ".local/share"
+        shared.mkdir(parents=True)
+        shared.chmod(0o777)
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertFalse(self.app.exists())
+
     def test_launcher_rejects_profile_override(self):
         self.build()
-        p = subprocess.run(["/bin/bash", str(self.app / "Contents/MacOS/launcher"), "--user-data-dir=/other"], env=self.env, capture_output=True)
+        p = self.launch("--user-data-dir=/other")
         self.assertNotEqual(p.returncode, 0)
 
     def test_cache_preserves_data_and_refuses_a_shared_running_profile(self):
         self.build()
-        profile = self.home / "profile one"
+        profile = self.profile('profile one')
         (profile / "Cache").mkdir()
         (profile / "Cache/sentinel").write_text("cache")
         (profile / "Local Storage").mkdir()
@@ -273,6 +447,27 @@ exec /bin/mv "$@"
         p.write_text(p.read_text() + "\necho altered\n")
         self.assertNotEqual(self.run_script(script="claude-stale-check.sh").returncode, 0)
 
+    def test_watchdog_does_not_append_to_symlinked_or_hardlinked_logs(self):
+        self.build()
+        self.env["CLAUDE_STALE_CHECK_DELAY"] = "0"
+        folder = self.home / "Library/Logs/claude-instances"
+        folder.mkdir(parents=True)
+        victim = self.root / "keep.txt"
+        victim.write_text("keep")
+        log = folder / "watchdog.log"
+        log.symlink_to(victim)
+        self.assertNotEqual(self.run_script(script="claude-stale-check.sh").returncode, 0)
+        self.assertEqual(victim.read_text(), "keep")
+        log.unlink()
+        os.link(victim, log)
+        self.assertNotEqual(self.run_script(script="claude-stale-check.sh").returncode, 0)
+        self.assertEqual(victim.read_text(), "keep")
+
+    def test_status_reports_its_limits(self):
+        self.build()
+        self.assertIn("Version comparison only", self.run_script("--status").stdout)
+        self.assertIn("account isolation not established", self.run_script("--verify").stdout)
+
     def test_source_is_never_modified(self):
         before = {str(p.relative_to(self.source)): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in self.source.rglob("*") if p.is_file()}
@@ -283,10 +478,10 @@ exec /bin/mv "$@"
 
     def test_numeric_hues_and_malformed_config(self):
         for hue in ["0", "000", "359"]:
-            self.write_config([("One", "com.audit.one", str(self.home / "p"), hue, "")])
+            self.write_config([("One", "com.audit.one", str(self.profile('p')), hue, "")])
             self.assertEqual(self.run_script("--list").returncode, 0, hue)
         for hue in ["-1", "360", "NaN", "1.5", "1000"]:
-            self.write_config([("One", "com.audit.one", str(self.home / "p"), hue, "")])
+            self.write_config([("One", "com.audit.one", str(self.profile('p')), hue, "")])
             self.assertNotEqual(self.run_script("--list").returncode, 0, hue)
         self.config.write_text("One | com.audit.one | /tmp/p | 142 | A=b | extra\n")
         self.assertNotEqual(self.run_script("--list").returncode, 0)
@@ -297,7 +492,7 @@ exec /bin/mv "$@"
             self.assertNotEqual(self.run_script("--list").returncode, 0, path)
 
     def test_config_without_final_newline_and_apostrophe_path(self):
-        profile = str(self.home / "user's profile")
+        profile = str(self.profile("user's profile"))
         self.write_config([("One", "com.audit.one", profile, "142", "")])
         self.config.write_text(self.config.read_text().rstrip("\n"))
         self.build()

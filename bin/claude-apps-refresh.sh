@@ -14,6 +14,7 @@ status() {
         printf '  %-24s %-14s' "Claude ${names[$i]}" "$version"
         if [ "$version" = "$source_version" ]; then printf 'same version\n'; else printf 'rebuild required\n'; fi
     done
+    printf 'Version comparison only; authenticity, GUI compatibility and account separation are not established by this status.\n'
 }
 list() {
     local i keys pair
@@ -28,7 +29,7 @@ verify() {
     local i rc=0
     for i in "${!names[@]}"; do
         if ci_verify_one "$(ci_app_path "${names[$i]}")" "$i"; then
-            printf 'Claude %s: verified (local signature; not an Anthropic-signed copy)\n' "${names[$i]}"
+            printf 'Claude %s: local launcher/signature checks passed (ad-hoc copy; full resource provenance and account isolation not established)\n' "${names[$i]}"
         else
             printf 'Claude %s: FAILED -- rebuild required\n' "${names[$i]}" >&2; rc=1
         fi
@@ -76,12 +77,14 @@ build_one() (
         fi
     done
     icon="$CI_ICONS/$(ci_lower "$name").icns"
+    [ ! -L "$icon" ] && { [ ! -e "$icon" ] || [ -f "$icon" ]; } || { ci_error 'icon master is not a regular file'; return 1; }
     if [ ! -f "$icon" ]; then
         if ! "$(dirname "${BASH_SOURCE[0]}")/claude-recolor-icon.sh" "${hues[$idx]}" "$icon"; then
             printf 'warning: icon generation failed; using stock icon\n' >&2
         fi
     fi
     if [ -f "$icon" ]; then
+        [ ! -L "$icon" ] && [ -O "$icon" ] && ci_no_allow_acl "$icon" || { ci_error 'unsafe icon master'; return 1; }
         cp "$icon" "$bundle/Contents/Resources/appicon.icns" || return 1
         "$CI_PB" -c 'Set :CFBundleIconFile appicon' "$bundle/Contents/Info.plist" || return 1
         if "$CI_PB" -c 'Print :CFBundleIconName' "$bundle/Contents/Info.plist" >/dev/null 2>&1; then
@@ -95,8 +98,8 @@ build_one() (
     codesign --force -s - "$bundle/Contents/MacOS/Claude" || return 1
     codesign --force -s - "$bundle" || return 1
     ci_verify_one "$bundle" "$idx" || return 1
-    mkdir -p "${dirs[$idx]}" "${code_dirs[$idx]}" || return 1
-    chmod 700 "${dirs[$idx]}" "${code_dirs[$idx]}" || return 1
+    ci_prepare_data_dir "${dirs[$idx]}" desktop || return 1
+    ci_prepare_data_dir "${code_dirs[$idx]}" code || return 1
     ci_require_stopped "$dest" || return 1
     if [ -e "$dest" ]; then
         mv "$dest" "$stage/previous.app" || return 1
@@ -123,8 +126,7 @@ umask 077
 [ -d "$CI_SRC" ] && [ ! -L "$CI_SRC" ] || { ci_error 'missing or symlinked source Claude.app'; exit 1; }
 codesign --verify --strict -R "$CI_REQUIREMENT" "$CI_SRC" || { ci_error 'source is not a valid Anthropic-signed Claude.app'; exit 1; }
 spctl --assess --type execute "$CI_SRC" || { ci_error 'Gatekeeper did not accept the source'; exit 1; }
-mkdir -p "$CI_ICONS" || exit 1
-[ ! -L "$CI_ICONS" ] || { ci_error 'refusing symlinked icon/lock directory'; exit 1; }
+ci_prepare_private_directory "$CI_ICONS" || exit 1
 lock="$CI_ICONS/.refresh-lock"
 mkdir "$lock" || { ci_error 'another rebuild or a stale lock exists; inspect .refresh-lock before retrying'; exit 1; }
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT

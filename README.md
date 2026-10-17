@@ -67,19 +67,36 @@ Hues: `0` red · `30` orange · `55` yellow · `142` green · `175` teal · `212
 
 ### Per-instance environment
 
-The optional 5th column exports environment variables before the app starts —
-semicolon-separated `KEY=VALUE` pairs, leading `~` expanded.
+The optional 5th column supports **only `CLAUDE_CONFIG_DIR=path`** in this
+subscription-account mode, with leading `~` expanded as data. Provider/API keys,
+endpoint, proxy and runtime overrides are rejected. Never store tokens here.
 Every additional Code account must use a distinct `CLAUDE_CONFIG_DIR`; otherwise
 configuration validation fails. Only one instance may use the default `~/.claude`.
 `--list` displays variable names without revealing their values.
 
-Use this column for variables explicitly set by this launcher before `exec`.
+The launcher uses privileged-mode Bash to ignore inherited startup files and
+starts the child with a minimal environment and a fixed system `PATH`. It refuses
+all caller arguments, including debug/sandbox/profile flags and URL callbacks.
+If an inherited proxy variable is present, launch fails rather than silently
+removing an approved proxy and connecting directly. Provider/proxy customization
+is not supported by this mode; use your approved Claude configuration instead.
+
 Code sessions can also load selected variables from shell initialization and
 their local environment editor/settings, so `.zshrc` is not universally
 irrelevant to GUI Code. Parent-process exports alone do not prove the effective
 configuration of every Code session. See the official
 [local environment documentation](https://code.claude.com/docs/en/desktop#local-sessions)
 and the [residual limitation analysis](docs/LIMITATIONS_AND_ROADMAP.md).
+
+Data paths must use the existing flat `~/Library/Application Support/Claude`
+or `Claude-*` layout and `~/.claude` or `.claude-*`, or managed
+`~/Library/Application Support/Multi Claude Desktop/Profiles/<UUID>/desktop`
+and `/code` directories. Legacy suffixes must be printable ASCII to avoid Unicode
+filesystem aliases. All Desktop/Code directory pairs must be disjoint. Files and
+ancestors must belong to this user, without group/other write access or custom
+allow ACLs. Standard macOS deny-delete ACLs are allowed. The config itself must
+be inside home with the same ownership/permission checks. Do not run with sudo.
+No history migration happens automatically; see [HARDENING.md](HARDENING.md).
 
 The motivating case is `CLAUDE_CONFIG_DIR`. Claude Code reads hooks from
 `$CLAUDE_CONFIG_DIR/settings.json` and stores agent-mode session history in
@@ -284,7 +301,7 @@ claude-apps-refresh.sh --verify
 ```
 
 ```
-Claude Personal: verified (local signature; not an Anthropic-signed copy)
+Claude Personal: local launcher/signature checks passed (ad-hoc copy; full resource provenance and account isolation not established)
 Claude Enterprise: FAILED -- rebuild required
 ```
 
@@ -411,7 +428,7 @@ It catches silent version and identity failures:
 | **STALE** | `Claude.app` updated; the copy did not, and will run the old version indefinitely |
 | **BROKEN** | missing app, changed bundle id, launcher, signature or environment — including an in-app update that replaces the launcher |
 
-Results go to `~/Library/Logs/claude-stale-check.log` as well as a notification, so the
+Results go to `~/Library/Logs/claude-instances/watchdog.log` as well as a notification, so the
 check still works if notification banners are suppressed. Run it by hand any time:
 
 ```bash

@@ -3,7 +3,7 @@
 ## Decision
 
 Keep PR #1 in draft until two-account **graphical Code** login and lifecycle
-tests pass. The existing hardening is useful, but its 23 fixture tests and a
+tests pass. The existing hardening is useful, but fixture tests and a
 real signing/rebuild check do not establish account separation end to end.
 
 The largest prospective improvement is a graphical launcher that starts the
@@ -12,9 +12,33 @@ investing in distributing modified Claude bundles. This is a hypothesis to
 validate, not an implemented or officially supported Claude multi-account mode.
 
 The review below concerns commit `c4b8a044e9944302dbe935ce079c3ba087f94af6`
-and the local Claude 2.42304.0 signing/rebuild baseline. Proposed items below
-have **not** been implemented by this document. Controlled results are in
+and the local Claude 2.42304.0 signing/rebuild baseline. The numbered review
+describes that baseline; the follow-up status
+is recorded separately here. Controlled baseline results are in
 [evidence/residual-limitations.json](evidence/residual-limitations.json).
+
+## Implemented security follow-up
+
+The environment/path follow-up now implements a subscription-only environment
+allowlist, a minimal child environment, rejection of all caller arguments,
+proxy detection/refusal, managed/legacy location constraints, a complete
+Desktop/Code overlap graph, owner/mode/ACL checks and a non-root requirement.
+Icons/locks and watchdog logs also use checked private paths; linked logs are
+refused. Status separates version comparison and local signature checks from
+account/provenance claims. See [HARDENING.md](../HARDENING.md) for compatibility.
+
+**41 offline regression tests pass locally on Apple Silicon.** A separate real
+Claude 2.42304.0 scratch build/rebuild and signature check passed, without
+opening the vendor executable. The original signature and critical file hashes
+were unchanged. Sanitized results are in
+[evidence/security-policy-follow-up.json](evidence/security-policy-follow-up.json).
+Neither result establishes graphical Code login, SSO, session continuity or
+account separation. The native GUI experiment is deferred while security fixes
+are prioritized. The PR remains a draft and installed apps are unchanged.
+
+The newly added macOS CI runs the offline suite on Apple Silicon and Intel.
+CI does not install Claude, run GUI/account tests, obtain credentials or verify
+Anthropic signatures; those remain separate evidence requirements.
 
 ## Threat model and evidence limits
 
@@ -39,7 +63,7 @@ ad-hoc executable has no entitlements in the metadata collected. Values of
 non-Boolean entitlements were intentionally not collected. This is stronger
 evidence of a compatibility gap than a simple valid/invalid signature test.
 
-The current [signing step](../bin/claude-apps-refresh.sh#L94-L97) intentionally
+The current [signing step](../bin/claude-apps-refresh.sh) intentionally
 uses ad-hoc signatures. Consequences can include SSO/Keychain changes and
 feature-specific failures. A successful ordinary chat or Code launch would not
 validate all these capabilities.
@@ -63,7 +87,7 @@ success alone is insufficient.
 
 ## 2. A verified launcher does not authenticate every resource
 
-Current [verification](../bin/claude-instances-common.sh#L155-L165) checks
+Current [verification](../bin/claude-instances-common.sh) checks
 identity, the complete expected launcher, and the bundle's own signature. In a
 new disposable real clone, adding an inert JS resource and re-signing locally
 still produced a successful `--verify`. The marker was never executed. This
@@ -112,44 +136,47 @@ continues; refresh credentials; receive login callbacks; update/rebuild; revoke
 permissions; and test any supported enterprise SSO. Record app version,
 architecture and macOS version without recording tokens or private transcripts.
 
-## 4. The environment denylist is incomplete
+## 4. Baseline environment gaps (launcher restrictions now implemented)
 
-The [parser](../bin/claude-instances-common.sh#L60-L76) validates keys and blocks
+The baseline parser validated keys and blocked
 several loader/shell overrides, but controlled checks still accepted
 `ELECTRON_RUN_AS_NODE`, `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`. A fixture
 child inherited a synthetic API-key value from the parent, and the launcher
 forwarded `--no-sandbox`. These are local configuration/launch conditions, not
 proven credential leakage from GUI Claude.
 
-Proposal: subscription-account mode should allow only explicitly supported
-configuration, initially the profile and Code directory. Construct a minimal
-environment, reject security-weakening launch flags, and classify endpoint,
-proxy, provider and credential overrides separately. Offer an explicit advanced
-provider mode with a preview of effective non-secret configuration. Never
-store tokens in the plain instance-definition file or log env values.
+Implemented for the launcher: subscription-account mode allows only the
+profile and Code directory configuration. The child has a minimal
+environment, every caller argument is rejected, and endpoint/provider/credential
+overrides in the config are refused. An inherited proxy causes refusal instead
+of silent removal. No advanced provider/proxy mode is implemented. Never store
+tokens in the plain instance-definition file or log env values.
 
 The GUI Code shell/environment layers must also be checked: sanitizing only the
 launcher's initial environment may be insufficient. Preserve required toolchain
 paths and enterprise policy; do not suppress managed settings or break an
 approved corporate proxy under the label of hardening.
 
-## 5. Paths can still overlap or target unsuitable directories
+## 5. Baseline path gaps (managed/legacy restrictions now implemented)
 
-The current [directory policy](../bin/claude-instances-common.sh#L36-L42)
-rejects a few dangerous roots, and its [duplicate tests](../bin/claude-instances-common.sh#L81-L88)
-compare Desktop directories with Desktop directories and Code directories with
-Code directories. Controlled checks accepted nested Desktop profiles, a Code
+The baseline directory policy rejected a few dangerous roots and compared
+Desktop directories with Desktop directories and Code directories with Code
+directories. Controlled checks accepted nested Desktop profiles, a Code
 directory equal to another Desktop profile, and `/etc` as a profile in `--list`.
 No system directory was modified. Normal user permissions limit actual writes,
 but accepting the configuration is still an avoidable hazard, particularly if
 someone runs the builder elevated.
 
-Proposal: default to a managed owner-only directory tree with stable profile
-IDs; reject root execution; use per-user application destinations where possible;
-validate ownership and writable ancestors. Detect equal **and ancestor/descendant**
-relationships across every Desktop/Code directory pair using filesystem-aware
-identity, Unicode/case handling and physical paths. Make arbitrary existing
-directories a reviewed legacy exception rather than the default.
+Implemented: managed UUID directories and the existing flat Claude legacy
+layout are the only accepted locations. Root execution, foreign ownership,
+group/other write permissions and custom allow ACLs are refused. Every
+Desktop/Code pair is checked for equality/nesting with physical paths and case
+folding; printable-ASCII legacy suffixes avoid Unicode normalization aliases.
+The config must be inside home with checked ownership and ancestors. Arbitrary
+existing paths have no automatic exception. Paths are rechecked before mutation
+and launch, but these observations cannot defeat a same-user racing process.
+Per-user app destinations and descriptor-based lifecycle coordination remain
+follow-ups.
 
 For legacy Personal, offer a closed-app, explicit backup-and-clone migration to
 a new managed directory. Do not move/delete the old profile or silently change
@@ -157,7 +184,7 @@ bundle IDs. Test history, login and Code continuity before committing migration.
 
 ## 6. Process snapshots do not lock the application lifecycle
 
-[Process observation](../bin/claude-instances-common.sh#L94-L132) now fails
+[Process observation](../bin/claude-instances-common.sh) now fails
 closed, which helps, but `ps` command text is not a lossless argv representation.
 Repeated snapshots and a rebuild lock cannot stop an external program or stock
 Claude from starting after a check. Personal still shares stock Claude's default
@@ -174,7 +201,7 @@ users, separate appropriately configured machines, or similarly real boundaries.
 
 ## 7. Recoverable rename is not an atomic or complete rollback
 
-The two [publication renames](../bin/claude-apps-refresh.sh#L98-L107) leave a
+The two [publication renames](../bin/claude-apps-refresh.sh) leave a
 gap. Cleanup traps do not run after SIGKILL or power loss, and stale locks have
 no recovery journal. After success the previous bundle is deleted, so there is
 also no retained last-known-good release. Most importantly, an older executable
@@ -266,7 +293,7 @@ S/M/L is relative scope, not a calendar estimate.
 Suggested follow-up PRs: (1) environment/path policy, (2) lifecycle evidence and
 truthful status, (3) unchanged-app experiment, (4) native transaction/recovery,
 (5) distribution/GUI. Gate each architectural switch on observed behavior.
-The existing 23 tests remain regression coverage, not a security percentage.
+The current 41 tests remain regression coverage, not a security percentage.
 
 ## What cannot be fixed solely in this repository
 
