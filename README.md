@@ -1,5 +1,10 @@
 # Multiple Claude Desktop Instances (macOS)
 
+This local revision includes script hardening and regression tests. Read
+[HARDENING.md](HARDENING.md) before installing; it describes stricter config
+validation, safe rebuild behavior, migration, and the signing/isolation limits
+that remain. Copy the shared `claude-instances-common.sh` with the other scripts.
+
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own
 coloured Dock icon.
@@ -46,7 +51,7 @@ Enterprise | com.example.claude-enterprise | ~/Library/Application Support/Claud
 Add a line and rebuild — the icon is generated automatically from the hue:
 
 ```bash
-echo 'Client | com.example.claude-client | ~/Library/Application Support/Claude-Client | 320' \
+echo 'Client | com.example.claude-client | ~/Library/Application Support/Claude-Client | 320 | CLAUDE_CONFIG_DIR=~/.claude-client' \
   >> ~/.config/claude-instances/instances.conf
 claude-apps-refresh.sh client
 ```
@@ -61,6 +66,9 @@ Hues: `0` red · `30` orange · `55` yellow · `142` green · `175` teal · `212
 
 The optional 5th column exports environment variables before the app starts —
 semicolon-separated `KEY=VALUE` pairs, leading `~` expanded.
+Every additional Code account must use a distinct `CLAUDE_CONFIG_DIR`; otherwise
+configuration validation fails. Only one instance may use the default `~/.claude`.
+`--list` displays variable names without revealing their values.
 
 **This is the only way to give an instance its own environment.** A macOS `.app` does not
 inherit your shell environment, so `export` in `.zshrc` has no effect on a Dock launch.
@@ -102,6 +110,8 @@ Rules the builder enforces, because both are silently destructive:
 
 - **Bundle ids must be unique.** Two instances sharing one id are the same app to macOS.
 - **Profiles must be unique.** Two instances on one profile can corrupt it.
+- **Code config directories must be unique.** Existing symlinks are resolved;
+  dot components and paths differing only in ASCII case are rejected.
 
 Changing an instance's bundle id later forces a fresh sign-in for that instance — macOS
 treats it as a different app for keychain purposes.
@@ -218,8 +228,10 @@ df -h /     # real usage; Finder will always claim ~825 MB per copy
 
 ### If a rebuild fails partway
 
-The builder `rm -rf`s the target *before* copying, so a failure can leave an app missing.
-Your data is untouched — just re-run it:
+The hardened builder prepares and verifies a staging copy before moving the old
+app. It restores the previous app if publishing fails in ordinary failure cases.
+If restoration is blocked, the error gives the path where the old app was kept.
+Profiles are outside the bundle. After resolving the reported failure, re-run:
 
 ```bash
 claude-apps-refresh.sh personal    # or any instance name, or with no argument for all
@@ -266,9 +278,8 @@ claude-apps-refresh.sh --verify
 ```
 
 ```
-Identity check:
-  Claude Personal        ok
-  Claude Enterprise      CLOBBERED -- bundle-id=com.anthropic.claudefordesktop executable=Claude bad-signature
+Claude Personal: verified (local signature; not an Anthropic-signed copy)
+Claude Enterprise: FAILED -- rebuild required
 ```
 
 Exit 1 if any instance was clobbered. The fix is always the same — rebuild it.
@@ -285,18 +296,18 @@ claude-instance-check.sh
 ```
 
 ```
-PID       APP                     PROFILE
-79012     Claude Personal         ~/Library/Application Support/Claude
-79210     Claude Enterprise       ~/Library/Application Support/Claude-Enterprise
-
-Instances running: 2    Distinct profiles: 2
-OK: every running instance has its own profile.
+PID      APP                      PROFILE
+79012    Claude Personal.app      /Users/you/Library/Application Support/Claude
+79210    Claude Enterprise.app    /Users/you/Library/Application Support/Claude-Enterprise
+OK: observed profiles are distinct.
 ```
 
 - **Exit 0** — healthy. One instance running is fine; that is not an error.
 - **Exit 1** — **profile collision**: two or more processes on one profile, each row
   flagged `<-- COLLISION`. Quit all but one immediately; concurrent writes to one
   LevelDB can corrupt it.
+- **Exit 2** — state unknown: process enumeration or profile inspection failed.
+  Do not interpret this as permission to rebuild or delete caches.
 
 The collision case is the whole point of the check, and it is easy to hit by accident —
 launching stock `Claude.app` while `Claude Personal` is open does it, since both default
@@ -316,7 +327,7 @@ In `~/bin` (keep it on your `PATH`).
 | `claude-instance-check.sh` | Health check; detects profile collisions |
 | `claude-apps-refresh.sh` | Build/rebuild instances. No args = all; or a name; `--status`; `--list`; `--verify` |
 | `claude-recolor-icon.sh` | Generate an icon master: `claude-recolor-icon.sh <hue> <out.icns>` |
-| `claude-stale-check.sh` | Watchdog: stale / clobbered / missing-icon across every instance |
+| `claude-stale-check.sh` | Watchdog: stale versions or broken identity/signature/launcher |
 | `claude-clear-caches.sh` | Quit an instance, delete only regenerable caches, relaunch |
 
 ---
@@ -381,18 +392,18 @@ carry version and security fixes, so failing one over cosmetics is the wrong tra
 
 ## Automated checks (`claude-stale-check.sh`)
 
-A LaunchAgent (`~/Library/LaunchAgents/com.example.claude-stale-check.plist`) runs the
-watchdog **at login and every 6 hours**, across **every instance in the config**. It only
+A provided LaunchAgent template, if installed at
+`~/Library/LaunchAgents/com.example.claude-stale-check.plist`, runs the watchdog
+**at login and every 6 hours**, across **every instance in the config**. It only
 reads and reports — it never rebuilds, because the builder refuses to touch a running app
 and a background job that quits your windows mid-conversation is worse than a stale copy.
 
-It catches three silent failures:
+It catches silent version and identity failures:
 
 | | What it means |
 |---|---|
 | **STALE** | `Claude.app` updated; the copy did not, and will run the old version indefinitely |
-| **CLOBBERED** | the copy lost its bundle id, launcher, signature or env exports — usually an in-app update accepted *inside* a copy, which drops the launcher and silently sends that instance to the **default (personal) profile** |
-| **icon master missing** | the next rebuild would fall back to the stock icon |
+| **BROKEN** | missing app, changed bundle id, launcher, signature or environment — including an in-app update that replaces the launcher |
 
 Results go to `~/Library/Logs/claude-stale-check.log` as well as a notification, so the
 check still works if notification banners are suppressed. Run it by hand any time:
@@ -588,7 +599,8 @@ claude-instance-check.sh
 `/Applications/Claude.app` is **never modified** — every script only reads it:
 
 ```bash
-codesign --verify --strict /Applications/Claude.app && echo "untouched"
+codesign --verify --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claudefordesktop"' /Applications/Claude.app
+spctl --assess --type execute /Applications/Claude.app
 ```
 
 ---
