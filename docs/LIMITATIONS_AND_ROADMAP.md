@@ -27,7 +27,8 @@ Icons/locks and watchdog logs also use checked private paths; linked logs are
 refused. Status separates version comparison and local signature checks from
 account/provenance claims. See [HARDENING.md](../HARDENING.md) for compatibility.
 
-**41 offline regression tests pass locally on Apple Silicon.** A separate real
+The environment/path milestone passed **41 offline tests** on Apple Silicon.
+A separate real
 Claude 2.42304.0 scratch build/rebuild and signature check passed, without
 opening the vendor executable. The original signature and critical file hashes
 were unchanged. Sanitized results are in
@@ -39,6 +40,29 @@ are prioritized. The PR remains a draft and installed apps are unchanged.
 The newly added macOS CI runs the offline suite on Apple Silicon and Intel.
 CI does not install Claude, run GUI/account tests, obtain credentials or verify
 Anthropic signatures; those remain separate evidence requirements.
+
+## Implemented publication follow-up
+
+Publication now uses a locally compiled C helper with directory descriptors,
+no-follow flags and a kernel lock inherited across the worker and children.
+An existing bundle is exchanged with `RENAME_SWAP`; a first install uses
+`RENAME_EXCL`. Unsupported/failed operations have no delete/move fallback.
+An immutable intention journal is written and synced before publication and
+the old bundle remains in its private transaction directory after exchange.
+`--recover` observes the recorded inode layout and checks a committed
+launcher/signature without replaying or undoing the operation.
+
+The suite now contains **60 tests**, including 14 native transaction tests.
+They exercise actual macOS rename/lock/ACL/sync operations, kill disposable
+helpers before/after exchange, check exclusive-publication conflicts, and
+refuse malformed/linked journals or uncertain layouts. Failure/stop injection
+is enabled only in a test compilation; production builds ignore its variables.
+See [ATOMIC_PUBLICATION.md](ATOMIC_PUBLICATION.md) for the protocol and limits.
+
+This addresses the two-rename gap and stale cooperating-process locks. It does
+not provide power-loss durability, automatic rollback, compatible profile
+restore, automatic retention pruning or isolation from external/same-user
+programs. A previous bundle is retained, not certified known-good.
 
 ## Threat model and evidence limits
 
@@ -199,28 +223,31 @@ coordinate cooperating processes only; they cannot enforce exclusivity against
 all same-user launches. Strong confidentiality still requires separate OS
 users, separate appropriately configured machines, or similarly real boundaries.
 
-## 7. Recoverable rename is not an atomic or complete rollback
+## 7. Baseline rename gap (atomic publication now implemented)
 
-The two [publication renames](../bin/claude-apps-refresh.sh) leave a
-gap. Cleanup traps do not run after SIGKILL or power loss, and stale locks have
-no recovery journal. After success the previous bundle is deleted, so there is
-also no retained last-known-good release. Most importantly, an older executable
+The baseline used two publication renames, leaving a gap. Its cleanup traps
+could not run after SIGKILL/power loss, the lock lacked a recovery journal and
+the prior bundle was deleted after success. Most importantly, an older executable
 may not understand a profile migrated by a newer version: binary rollback alone
 does not restore data compatibility.
 
-Proposal: use a native, same-filesystem transaction helper. For an existing
-target, atomically exchange validated old/new directories with `RENAME_SWAP`;
-for a new target, publish with `RENAME_EXCL`. Use directory descriptors and
-no-follow policies, an owner-only journal and capability checks. Fail closed
-when the required filesystem operation is unsupported rather than silently
-falling back to a less safe replacement. The [Apple rename manual](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/rename.2)
+Implemented: a native same-filesystem helper exchanges an existing target with
+`RENAME_SWAP` or publishes a first install with `RENAME_EXCL`, using directory
+descriptors, no-follow policies and an owner-only intention journal. The actual
+operation fails closed if unsupported; no weaker replacement is attempted.
+The old bundle is retained and a kernel lock replaces the stale directory-lock
+protocol for new runs. Legacy directory locks remain subject to inspection.
+The [Apple rename manual](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/rename.2)
 and [header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/stdio.h)
-define these facilities. A controlled local fixture swap succeeded.
+define these facilities. Native tests now cover real exchanges/exclusive
+publication, SIGKILL on both sides of exchange and lock release.
 
 Atomic namespace exchange is not proof of durable storage after power failure.
-Journal ordering, syncing and restart recovery need explicit tests. Retain a
-last-known-good bundle and a consistent closed-profile backup/checkpoint with
-permissions and retention limits. Treat Keychain state and project files as
+The journal and parent directory metadata are synced, but the helper does not
+recursively sync all app data or guarantee hardware cache flush. Recovery only
+classifies known inode layouts; unknown/partial/superseded records are never
+replayed or deleted. A consistent closed-profile backup/checkpoint and reviewed
+retention limits remain follow-ups. Treat Keychain state and project files as
 outside a simple bundle backup. Never promise safe downgrade after a schema
 migration without testing the matching profile restore path.
 
@@ -293,7 +320,7 @@ S/M/L is relative scope, not a calendar estimate.
 Suggested follow-up PRs: (1) environment/path policy, (2) lifecycle evidence and
 truthful status, (3) unchanged-app experiment, (4) native transaction/recovery,
 (5) distribution/GUI. Gate each architectural switch on observed behavior.
-The current 41 tests remain regression coverage, not a security percentage.
+The current 60 tests remain regression coverage, not a security percentage.
 
 ## What cannot be fixed solely in this repository
 

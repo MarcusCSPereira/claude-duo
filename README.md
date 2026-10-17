@@ -212,20 +212,20 @@ built at.
 # 1. Check for drift
 claude-apps-refresh.sh --status
 
-# 2. Launch STOCK Claude, let it update itself, then quit it (Cmd-Q)
-open -a "/Applications/Claude.app"
+# 2. Quit every coloured app (Cmd-Q), especially Personal sharing stock's profile
 
-# 3. Quit every coloured app (Cmd-Q) -- the rebuild refuses to touch a running app
+# 3. Launch STOCK Claude, let it update itself, then quit it (Cmd-Q)
+open -a "/Applications/Claude.app"
 
 # 4. Rebuild
 claude-apps-refresh.sh
 
 # 5. Verify
-claude-apps-refresh.sh --status
+claude-apps-refresh.sh --verify
 claude-instance-check.sh
 ```
 
-Step 2 is the one people skip. Without it there is no new version to rebuild *from*, and
+Without updating stock Claude there is no new version to rebuild *from*, and
 step 4 just reproduces the same version.
 
 ### What a rebuild touches
@@ -235,15 +235,18 @@ step 4 just reproduces the same version.
 | Every profile (accounts, conversations, settings, MCP config) | The app bundles |
 | Instance config and icon masters | Bundle identity, launcher, signature |
 
-Profiles live **outside** the bundles, which is why rebuilding is safe. The bundle is
-disposable; the profile is the asset.
+The builder does not migrate profile contents: profiles live **outside** the
+bundles. Opening a newer app may migrate them, so retaining an older bundle
+alone does not make a later downgrade safe.
 
 ### Disk creep
 
 Each instance normally costs ~2 MB real, because APFS clone-sharing means unchanged
 files share blocks with `Claude.app`. **A Claude update breaks that sharing** — old
 blocks are retained for your copies and real usage climbs toward the full 823 MB each.
-Rebuilding re-establishes sharing and reclaims it. Another reason not to skip the refresh.
+Rebuilding re-establishes sharing for the current copies. Retained previous
+bundles still keep old blocks alive: the hardened builder does not automatically
+prune them or promise that a rebuild reclaims all old space.
 
 ```bash
 df -h /     # real usage; Finder will always claim ~825 MB per copy
@@ -251,16 +254,36 @@ df -h /     # real usage; Finder will always claim ~825 MB per copy
 
 ### If a rebuild fails partway
 
-The hardened builder prepares and verifies a staging copy before moving the old
-app. It restores the previous app if publishing fails in ordinary failure cases.
-If restoration is blocked, the error gives the path where the old app was kept.
-Profiles are outside the bundle. After resolving the reported failure, re-run:
+The hardened builder verifies a staged copy, writes an immutable private journal
+and uses a native atomic exchange for a replacement. A first install uses an
+exclusive rename that refuses to overwrite a path appearing concurrently. There
+is no delete/move fallback if the filesystem refuses the required operation.
+
+The printed `/Applications/.claude-txn.XXXXXXXX` directory holds the journal and,
+after a replacement, the previous bundle at `instance.app`. Inspect the printed
+transaction before retrying:
+
+```bash
+claude-apps-refresh.sh --recover .claude-txn.XXXXXXXX
+```
+
+This only observes the recorded layout and checks a committed launcher/signature;
+it does not restore, replay, launch or delete bundles/profiles. Unknown state fails
+closed. Later rebuilds can supersede older journal layouts. After resolving the
+reported failure, a fresh rebuild creates a new transaction:
 
 ```bash
 claude-apps-refresh.sh personal    # or any instance name, or with no argument for all
 ```
 
 If the source itself is broken, reinstall Claude, then rebuild.
+
+Rebuild/recovery now requires macOS 12+ and Xcode Command Line Tools. Install the
+whole `bin/claude-*` set, including the worker and C source. A kernel lock holds
+across the worker/children and releases on exit; do not remove its persistent
+`.claude-instances.lock` file to force another build. Old `.refresh-lock`
+directories still require inspection. Retained bundles are not automatically
+pruned or treated as safe profile downgrades; see [HARDENING.md](HARDENING.md).
 
 ### If Claude.app updates while a copy is running
 
@@ -348,7 +371,7 @@ In `~/bin` (keep it on your `PATH`).
 | Script | What it does |
 |---|---|
 | `claude-instance-check.sh` | Health check; detects profile collisions |
-| `claude-apps-refresh.sh` | Build/rebuild instances. No args = all; or a name; `--status`; `--list`; `--verify` |
+| `claude-apps-refresh.sh` | Build/rebuild instances. No args = all; or a name; `--status`; `--list`; `--verify`; `--recover <transaction>` |
 | `claude-recolor-icon.sh` | Generate an icon master: `claude-recolor-icon.sh <hue> <out.icns>` |
 | `claude-stale-check.sh` | Watchdog: stale versions or broken identity/signature/launcher |
 | `claude-clear-caches.sh` | Quit an instance, delete only regenerable caches, relaunch |
@@ -469,6 +492,8 @@ For each instance, `claude-apps-refresh.sh`:
 3. **Installs the icon**, generating it from the hue if missing.
 4. **Writes a launcher** pinning the profile and the CPU architecture.
 5. **Re-signs** the main binary and outer bundle, ad-hoc.
+6. **Publishes atomically** under a kernel lock, after syncing a private intention
+   journal. A replacement retains the previous bundle for reviewed recovery.
 
 ### Why each choice — don't "simplify" these
 
