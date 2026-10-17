@@ -7,6 +7,7 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import select
 import shutil
 import subprocess
 import tempfile
@@ -58,7 +59,7 @@ class HardeningTests(unittest.TestCase):
         for src in (REPO / "bin").glob("*.sh"):
             code = src.read_text().replace("$HOME", "$MULTI_CLAUDE_TEST_HOME")
             code = code.replace("PATH=/usr/bin:/bin:/usr/sbin:/sbin\n", "PATH=" + str(self.bin) + ":/usr/bin:/bin:/usr/sbin:/sbin\n")
-            code = code.replace("/Applications", str(self.apps))
+            code = code.replace('"/Applications', '"' + str(self.apps))
             code = code.replace("CI_PB=/usr/libexec/PlistBuddy", "CI_PB=" + str(self.bin / "pb"))
             code = code.replace("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "/usr/bin/true")
             code = code.replace("/usr/bin/osascript", str(self.bin / "osascript"))
@@ -195,6 +196,151 @@ exec "$@"
         self.assertNotEqual(self.run_script("--verify").returncode, 0)
         self.build()
         self.assertEqual(self.run_script("--verify").returncode, 0)
+
+    def test_user_apps_build_verification_and_recovery_preserve_system_apps(self):
+        private = self.home / "Applications"
+        private.mkdir(mode=0o700)
+        self.set_mode()
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        before = {str(p.relative_to(self.source)): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}
+        self.build()
+        copy = private / "Claude One.app"
+        self.assertTrue(copy.is_dir())
+        self.assertFalse(self.app.exists())
+        self.assertFalse((self.apps / ".claude-instances.lock").exists())
+        verified = self.run_script("--verify")
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        launched = subprocess.run([str(copy / "Contents/MacOS/launcher")], env=self.env,
+                                  text=True, capture_output=True, timeout=10)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        self.assertIn("--user-data-dir=" + str(self.profile("profile one")), launched.stdout)
+        self.assertIn("CONFIG=" + str(self.code("code one")), launched.stdout)
+        self.build()
+        retained = [p for p in private.glob(".claude-txn.*") if (p / "instance.app").exists()]
+        self.assertEqual(len(retained), 1)
+        observed = self.run_script("--recover", retained[0].name)
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn("COMMITTED", observed.stdout)
+        after = {str(p.relative_to(self.source)): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+
+    def test_user_apps_cache_cleanup_preserves_account_data_and_system_directory(self):
+        private = self.home / "Applications"
+        private.mkdir(mode=0o700)
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        self.build()
+        profile = self.profile("profile one")
+        (profile / "Cache").mkdir()
+        (profile / "Cache/bytes").write_text("regenerable fixture")
+        (profile / "Local Storage").mkdir()
+        data = profile / "Local Storage/keep"
+        data.write_text("invented account state")
+        result = self.run_script(script="claude-clear-caches.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((profile / "Cache").exists())
+        self.assertEqual(data.read_text(), "invented account state")
+        self.assertFalse((self.apps / ".claude-instances.lock").exists())
+
+    def test_user_apps_maintenance_uses_one_private_kernel_lock(self):
+        private = self.home / "Applications"
+        private.mkdir(mode=0o700)
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        shutil.copyfile(REPO / "bin/claude-checkpoint.c", self.bin / "claude-checkpoint.c")
+        tx = self.bin / "transaction"
+        subprocess.run(["/usr/bin/clang", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+                        "-mmacosx-version-min=12.0", str(REPO / "bin/claude-transaction.c"), "-o", str(tx)], check=True)
+        worker = self.bin / "hold.sh"
+        worker.write_text('"$1" locked "$2" || exit 1\nprintf "LOCKED\\n"\nexec /bin/cat >/dev/null\n')
+        process = subprocess.Popen([str(tx), "run", str(private), str(worker), str(private)],
+                                   env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: process.communicate(timeout=5))
+        self.addCleanup(lambda: process.kill() if process.poll() is None else None)
+        self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+        self.assertEqual(process.stdout.readline().strip(), "LOCKED")
+        for script, args in [("claude-apps-refresh.sh", ()), ("claude-clear-caches.sh", ()),
+                             ("claude-profile-checkpoint.sh", ("create", "One"))]:
+            result = self.run_script(*args, script=script)
+            self.assertNotEqual(result.returncode, 0, script)
+            self.assertIn("holds the lock", result.stderr)
+        self.assertFalse(self.app.exists())
+        self.assertFalse((self.apps / ".claude-instances.lock").exists())
+
+    def test_apps_directive_is_data_and_rejects_late_duplicate_or_arbitrary_paths(self):
+        original = self.config.read_text()
+        marker = self.home / "unexpected"
+        for directive in ["@apps /tmp", "@apps ~/Applications", "@apps USER", "@apps user extra",
+                          "@apps $(touch " + str(marker) + ")", "@apps user\n@apps system"]:
+            self.config.write_text(directive + "\n" + original)
+            self.assertNotEqual(self.run_script("--list").returncode, 0, directive)
+        self.config.write_text(original + "@apps user\n")
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.home / "Applications").exists())
+        self.assertFalse(self.app.exists())
+
+    def test_user_apps_missing_file_alias_or_nonprivate_mode_is_refused_without_changes(self):
+        private = self.home / "Applications"
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertFalse(private.exists())
+        private.write_text("keep")
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual(private.read_text(), "keep")
+        private.unlink()
+        private.symlink_to(self.apps, target_is_directory=True)
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertFalse(self.app.exists())
+        private.unlink()
+        private.mkdir(mode=0o755)
+        for mode in [0o755, 0o775, 0o1700]:
+            private.chmod(mode)
+            self.assertNotEqual(self.run_script().returncode, 0)
+            self.assertEqual(private.stat().st_mode & 0o7777, mode)
+        self.assertFalse(list(private.iterdir()))
+
+    def test_user_apps_rechecks_acl_and_ancestor_permissions_before_maintenance(self):
+        private = self.home / "Applications"
+        private.mkdir(mode=0o700)
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(private)], check=True)
+        self.assertEqual(self.run_script("--list").returncode, 0)
+        subprocess.run(["/bin/chmod", "+a", "everyone allow add_file", str(private)], check=True)
+        for script, args in [("claude-apps-refresh.sh", ()), ("claude-clear-caches.sh", ()),
+                             ("claude-profile-checkpoint.sh", ("create", "One"))]:
+            self.assertNotEqual(self.run_script(*args, script=script).returncode, 0)
+        subprocess.run(["/bin/chmod", "-N", str(private)], check=True)
+        self.home.chmod(0o777)
+        self.assertNotEqual(self.run_script("--list").returncode, 0)
+        self.assertFalse(list(private.iterdir()))
+
+    def test_apps_location_ignores_inherited_overrides_and_preserves_default_binding(self):
+        self.env.update({"CI_APP_SCOPE": "user", "CI_APPS": str(self.home / "unexpected"),
+                         "CI_SYSTEM_APPS": str(self.home / "unexpected")})
+        self.build()
+        launcher = (self.app / "Contents/MacOS/launcher").read_bytes()
+        self.config.write_text("@apps system\n" + self.config.read_text())
+        self.assertEqual(self.run_script("--verify").returncode, 0)
+        self.assertEqual((self.app / "Contents/MacOS/launcher").read_bytes(), launcher)
+        self.assertFalse((self.home / "unexpected").exists())
+
+    def test_moving_a_system_copy_to_user_apps_requires_a_reviewed_rebuild(self):
+        self.set_mode()
+        self.build()
+        private = self.home / "Applications"
+        private.mkdir(mode=0o700)
+        moved = private / self.app.name
+        self.app.rename(moved)
+        self.config.write_text("@apps user\n" + self.config.read_text())
+        self.assertNotEqual(self.run_script("--verify").returncode, 0)
+        # Even replacing the expected launcher cannot reuse the old content
+        # record: application location participates in its binding.
+        script = 'source "$1"; ci_load_config && ci_render_launcher 0'
+        rendered = subprocess.run(["/bin/bash", "-c", script, "test", str(self.bin / "claude-instances-common.sh")],
+                                  env=self.env, capture_output=True, check=True)
+        (moved / "Contents/MacOS/launcher").write_bytes(rendered.stdout)
+        refused = self.run_script("--verify")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("binding", refused.stderr)
 
     def test_build_and_gui_launcher_environment(self):
         self.build()

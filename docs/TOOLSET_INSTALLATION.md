@@ -171,6 +171,23 @@ In particular, a legacy Personal clone using the default profile must not run
 alongside the original. Preserve existing bundle IDs and data until reviewed
 migration; choosing the name Duo does not itself migrate an existing account.
 
+An optional `@apps user` header, also once before rows, selects only the fixed
+physical `~/Applications` directory. It must already exist, be owned/private
+(exact mode 0700, no special bits) and have safe ancestors/ACLs. Loading config
+never creates or chmods it. `@apps system`, or no directive, keeps `/Applications`.
+Config cannot supply arbitrary paths and inherited scope/path variables are
+reset. The official source remains `/Applications/Claude.app`. User location is
+bound into expected launcher bytes and the content-record config digest;
+moving a system copy is insufficient to pass verification.
+
+All mutation workers use the chosen directory and its kernel lock. Locks do
+not span two different app directories using the same profiles; location
+changes require reviewed transition and do not disable old launchers. This
+opt-in supports the separate standard-user [GUI laboratory](GUI_VALIDATION_PT_BR.md)
+without giving that account write access to shared system applications.
+Retained releases predating `@apps` refuse that directive; activating an older
+toolset does not migrate the private apps or make their configuration compatible.
+
 ## Validation and remaining limits
 
 Tests use synthetic homes and package data, actual macOS rename/lock/file calls,
@@ -192,14 +209,17 @@ installation or automatic Claude-copy rebuilding. Retained staging/compilation
 outputs consume disk space. Only synthetic installations have been exercised;
 installed legacy tools/apps/profiles remain untouched.
 
-The milestone passes **137 offline tests**, including 25 native installer tests
-and six additional profile-policy cases. A separate real Claude 2.42304.0 source
-check passes eight scratch build/signature/content/policy checks, with lifecycle
-observations simulated and no vendor execution. Exact tested source hashes,
-counts and remaining limits are in
-[evidence/toolset-installation.json](evidence/toolset-installation.json).
+The installer milestone at `0bee9cc` passed **137 offline tests**, including 25
+native installer tests and six additional profile-policy cases; its historical
+evidence is in [toolset-installation.json](evidence/toolset-installation.json).
+The private-app-location follow-up passes **145 offline tests**, including eight
+new path/policy/maintenance cases. A separate real Claude 2.42304.0 source check
+passes eight scratch build/signature/content/policy checks at the private user
+destination, with lifecycle observations simulated and no vendor execution.
+Current tested source hashes, counts and limits are in
+[gui-preparation.json](evidence/gui-preparation.json).
 
-CI runs the same suite in three groups per architecture: profiles (53), storage
+CI runs the same suite in three groups per architecture: profiles (61), storage
 (59) and toolsets (25). Each group first verifies that their combined test IDs
 match full discovery exactly once. Unassigned new modules and duplicates fail
 the inventory check. This bounds each job without omitting cases; a serial

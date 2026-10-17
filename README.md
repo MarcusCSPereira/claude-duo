@@ -19,6 +19,11 @@ does not change an existing installation or disable legacy copies.
 The copy is named **Claude Duo**. The [versioned tool installer](docs/TOOLSET_INSTALLATION.md)
 now stages/verifies complete pinned toolsets and activates them atomically;
 it does not migrate or rename existing apps or profiles.
+The [graphical validation plan](docs/GUI_VALIDATION_PT_BR.md) uses a separate
+standard macOS test account and an opt-in private `~/Applications` destination.
+The [configuration reuse proposal](docs/PROFILE_REUSE_PT_BR.md) covers importing
+preferences, MCP definitions and plugin selections while keeping authentication
+separate; the importer is not implemented yet.
 
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own

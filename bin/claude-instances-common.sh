@@ -1,7 +1,9 @@
 #!/bin/bash
 # Shared data-only configuration and verification; macOS Bash 3.2 compatible.
 CI_SRC="/Applications/Claude.app"
-CI_APPS="/Applications"
+CI_SYSTEM_APPS="/Applications"
+CI_APPS="$CI_SYSTEM_APPS"
+CI_APP_SCOPE=system
 CI_CONF="${CLAUDE_INSTANCES_CONF:-$HOME/.config/claude-instances/instances.conf}"
 CI_ICONS="$HOME/.local/share/claude-instances"
 CI_PB=/usr/libexec/PlistBuddy
@@ -105,6 +107,18 @@ ci_prepare_private_directory() {
     current="$(ci_canonical_dir "$path")" && [ "$current" = "$path" ] && ci_owned_directory_chain "$path" "$ci_home_path" || return 1
     /bin/chmod 700 "$path"
 }
+ci_user_app_directory() {
+    local ci_home_path="$1" expected physical mode
+    expected="$ci_home_path/Applications"
+    # This is a fixed, pre-existing private directory, never an arbitrary path
+    # from config. Do not create it, chmod other apps, or follow an alias.
+    [ -d "$expected" ] && [ ! -L "$expected" ] && [ -O "$expected" ] || { ci_error 'user applications require an existing owned ~/Applications directory'; return 1; }
+    physical="$(ci_canonical_dir "$expected")" && [ "$physical" = "$expected" ] || { ci_error 'user applications directory must be physical'; return 1; }
+    # %Lp omits special bits on Darwin; inspect the full octal mode instead.
+    mode="$(/usr/bin/stat -f '%p' "$expected")" && [[ "$mode" =~ ^[0-7]{3,7}$ ]] && [ "$((8#$mode & 07777))" -eq "$((0700))" ] || { ci_error 'user applications directory must have mode 0700; no permissions changed'; return 1; }
+    ci_owned_directory_chain "$expected" "$ci_home_path" || return 1
+    CI_APPS="$expected"
+}
 ci_load_config() {
     local LC_ALL=C current_uid
     current_uid="$(/usr/bin/id -u)" && [[ "$current_uid" =~ ^[0-9]+$ ]] && [ "$current_uid" != 0 ] || { ci_error 'cannot establish a non-root user; do not run instance tools with sudo'; return 1; }
@@ -123,7 +137,8 @@ ci_load_config() {
     # Mode is config data, never an environment override. Headerless configs
     # retain the legacy policy until an explicit, reviewed transition.
     CI_MODE=legacy-copies
-    local mode_seen=no line n bid dir hue env extra pair key value seen normalized code_dir a b
+    CI_APP_SCOPE=system; CI_APPS="$CI_SYSTEM_APPS"
+    local mode_seen=no apps_seen=no line n bid dir hue env extra pair key value seen normalized code_dir a b
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%%#*}"; line="$(ci_trim "$line")"
         [ -n "$line" ] || continue
@@ -131,6 +146,10 @@ ci_load_config() {
             [ "$mode_seen" = no ] && [ "${#names[@]}" -eq 0 ] || { ci_error 'mode must appear once before instances'; return 1; }
             case "$line" in '@mode original-copy') CI_MODE=original-copy ;; '@mode legacy-copies') CI_MODE=legacy-copies ;; *) ci_error 'unknown instance mode'; return 1 ;; esac
             mode_seen=yes; continue ;;
+        @apps*)
+            [ "$apps_seen" = no ] && [ "${#names[@]}" -eq 0 ] || { ci_error 'apps location must appear once before instances'; return 1; }
+            case "$line" in '@apps system') CI_APP_SCOPE=system ;; '@apps user') CI_APP_SCOPE=user ;; *) ci_error 'unknown apps location; use system or user'; return 1 ;; esac
+            apps_seen=yes; continue ;;
         esac
         IFS='|' read -r n bid dir hue env extra <<<"$line"
         [ -z "${extra:-}" ] && [[ "$line" != *'|'*'|'*'|'*'|'*'|'* ]] || { ci_error 'too many config columns'; return 1; }
@@ -166,6 +185,7 @@ ci_load_config() {
         names+=("$n"); ids+=("$bid"); dirs+=("$dir"); hues+=("$hue"); envs+=("$normalized"); code_dirs+=("$code_dir")
     done < "$CI_CONF"
     [ "${#names[@]}" -gt 0 ] || { ci_error 'no instances configured'; return 1; }
+    if [ "$CI_APP_SCOPE" = user ]; then ci_user_app_directory "$config_home" || return 1; fi
     if [ "$CI_MODE" = original-copy ]; then
         [ "${#names[@]}" -eq 1 ] || { ci_error 'original-copy mode requires exactly one managed copy'; return 1; }
         local stock_desktop stock_code
@@ -247,6 +267,7 @@ ci_render_launcher() {
     local idx="$1"
     printf '#!/bin/bash -p\nset -euo pipefail\numask 077\n'
     [ "$CI_MODE" != original-copy ] || printf '# profile policy: original-copy\n'
+    [ "$CI_APP_SCOPE" != user ] || printf '# application location: private user Applications\n'
     printf '%s\n' 'HERE="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"'
     printf 'DATA_DIR=%q\n' "${dirs[$idx]}"
     printf 'CODE_DIR=%q\n' "${code_dirs[$idx]}"
@@ -281,7 +302,12 @@ ci_compile_integrity() {
 ci_integrity_binding() {
     local idx="$1" result policy=MCD_BUILD_CONFIG_1
     [ "$CI_MODE" != original-copy ] || policy=MCD_BUILD_CONFIG_ORIGINAL_COPY_1
-    result="$(printf '%s\0' "$policy" "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}" | /usr/bin/shasum -a 256)" || return 1
+    result="$(
+        {
+            [ "$CI_APP_SCOPE" != user ] || printf '%s\0' MCD_USER_APPLICATIONS_1 "$CI_APPS"
+            printf '%s\0' "$policy" "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}"
+        } | /usr/bin/shasum -a 256
+    )" || return 1
     printf '%s\n' "${result%% *}"
 }
 ci_integrity_helper_valid() {
@@ -304,6 +330,7 @@ ci_verify_one() {
 ci_status() {
     local i app version source_version
     source_version="$(ci_version "$CI_SRC")" || source_version=unavailable
+    printf 'Managed applications (%s): %s\n' "$CI_APP_SCOPE" "$CI_APPS"
     printf '  %-24s %s\n' 'Claude.app (source)' "$source_version"
     for i in "${!names[@]}"; do
         app="$(ci_app_path "${names[$i]}")"

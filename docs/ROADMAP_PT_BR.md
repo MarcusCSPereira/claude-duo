@@ -71,6 +71,13 @@ Sua prioridade continua sendo **segurança primeiro**. O protótipo de um novo
 gerenciador nativo está adiado. O caminho atual deve passar pelos testes antes
 de investirmos em outra interface.
 
+Requisito adicional: reaproveitar no Duo as preferências, MCPs e plugins do
+original, pois a pessoa é a mesma. A [proposta de importação seletiva](PROFILE_REUSE_PT_BR.md)
+define o original como referência, preserva ajustes próprios do Duo e mantém
+login, sessões e credenciais separados. Importador e sincronização ainda não
+estão implementados. Isso não significa copiar todo o perfil ou compartilhar
+as pastas das duas contas.
+
 ## Onde estamos
 
 | Item | Situação comprovada | Limite da evidência |
@@ -80,17 +87,20 @@ de investirmos em outra interface.
 | Manutenção | Travamento entre ferramentas, observação nativa de processos e limpeza restrita de caches | Outros programas ainda podem iniciar ou escrever fora dessa coordenação |
 | Cópia de segurança dos perfis | Checkpoint opcional do par Desktop/Code com verificação de conteúdo | Sem restauração; formato restrito; exclui Chaveiro e projetos externos; conteúdo não criptografado |
 | Instalador e modo original + Duo | Conjunto completo verificado, versões retidas, ativação atômica do conjunto e operação em andamento vinculada à sua versão | Integração com instalação legada e interface de manutenção pendentes |
-| Testes automatizados atuais | 137 testes aprovados localmente; resultados remotos desta etapa registrados no PR | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
+| Testes automatizados atuais | 145 testes aprovados localmente; resultados remotos desta etapa registrados no PR | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
 | Base anterior de CI | 106 testes aprovados em Apple Silicon e Intel no commit `2d37bf6` | Evidência histórica, anterior ao instalador |
-| Claude Duo em pasta descartável | 8 checagens reais aprovadas: origem oficial, construção, conteúdo/assinatura e reserva do perfil padrão | Observação de processos simulada; aplicativo não aberto; contas não usadas |
+| Claude Duo em pasta descartável | 8 checagens reais aprovadas, agora também no destino privado: origem oficial, construção, conteúdo/assinatura e reserva do perfil padrão | Observação de processos simulada; aplicativo não aberto; contas não usadas |
 | Aplicativo real na base anterior | 10 verificações aprovadas com Claude 2.42304.0, incluindo detecção de alteração após nova assinatura local | O executável do Claude não foi aberto e nenhuma conta foi usada nesses testes |
 | Instalação na sua máquina | Instalação legada preservada | As novas proteções ainda não foram instaladas nos aplicativos em uso |
 
 Referências: [CI da base conferida](https://github.com/guibrbs/multi-claude-desktop/actions/runs/39061863713),
 [evidências](evidence/integrity-maintenance.json) e
 [limitações técnicas](LIMITATIONS_AND_ROADMAP.md).
-As evidências da etapa atual, com os hashes dos arquivos testados, estão em
-[toolset-installation.json](evidence/toolset-installation.json).
+As evidências da base do instalador estão em
+[toolset-installation.json](evidence/toolset-installation.json). A etapa de
+preparação do laboratório, com os 145 testes e hashes atuais, está em
+[gui-preparation.json](evidence/gui-preparation.json). O destino privado foi
+ensaiado em pastas descartáveis; o usuário de teste do macOS ainda não foi criado.
 
 ## Ordem de execução
 
@@ -159,13 +169,18 @@ reais e converter os atalhos legados permanecem etapas separadas.
   compatibilidade gráfica e identidade da conta observada. Cada informação
   precisa indicar quando foi verificada ou se permanece desconhecida.
 - Preparar o ensaio do original e de uma cópia com dados inventados e projetos
-  descartáveis, em ambiente de teste que não use seus perfis atuais. Definir
-  como exercitar o perfil padrão do original sem acessar o perfil pessoal em
-  uso. Conferir destinos, registro de aplicativos, Dock e atalhos antes de abrir.
+  descartáveis, em um usuário local Padrão de teste. Os dois apps ficam na mesma
+  sessão e o original exercita o perfil padrão dessa conta nova. `@apps user`
+  permite construir o Duo em `~/Applications` privado sem escrever nos apps
+  compartilhados. O [roteiro gráfico](GUI_VALIDATION_PT_BR.md) descreve a
+  preparação; criar a conta e entrar nela ainda depende do usuário. Conferir
+  destinos, registro de aplicativos, Dock e atalhos antes de abrir.
 - Registrar versões exatas de macOS, arquitetura, Claude e ferramentas.
   O mínimo macOS 12 dos auxiliares não comprova suporte do próprio Claude.
 - Confirmar tipos de login necessários: pessoal, organização e SSO, se usado;
   Code local e outros recursos que você realmente pretenda utilizar.
+  Para o primeiro ensaio, o usuário confirmou login por link de e-mail, sem
+  SSO. O retorno desse link precisa funcionar para o app e a conta corretos.
 - Documentar a perda de identidade/permissões nas cópias e verificar possíveis
   efeitos no Chaveiro, permissões do macOS, subprocessos e recursos do Code.
 - Diferenciar as proteções do nosso iniciador da configuração efetiva do
@@ -199,6 +214,7 @@ ao original não depende de ser a pessoal ou a de trabalho.
 | Abrir pelo Dock, Finder e atalhos | Destino e perfil corretos, inclusive com cópias antigas retidas |
 | Abrir original e cópia; tentar iniciar uma cópia legada com o perfil padrão | Original e cópia principal usam dados distintos; conflito legado reconhecido; manutenção recusada com aplicativos ativos |
 | Usar configuração local do Code | Shell, hooks, MCP e configurações de projeto não causam mistura inesperada |
+| Reaproveitar preferências e extensões selecionadas | Configuração importada funciona; autenticação e ajustes próprios do Duo preservados; importador ainda pendente |
 | Solicitar permissões e usar os recursos declarados | Funcionamento registrado para cada identidade de aplicativo |
 
 O iniciador atual rejeita todos os argumentos, inclusive URLs. O fluxo de
@@ -251,6 +267,13 @@ ensaios de encerramento de processo não certificam resistência a falta de
 energia. Versão anterior guardada não autoriza downgrade sobre dados migrados.
 
 ## 5. Preservar os dados existentes, se houver migração
+
+O reaproveitamento de configurações solicitado é uma entrega distinta da
+migração de contas/histórico. Desenvolver primeiro inventário e prévia, com
+dados inventados, conforme [PROFILE_REUSE_PT_BR.md](PROFILE_REUSE_PT_BR.md).
+Depois ensaiar importação seletiva, conflitos e sincronização em uma direção;
+repetir a matriz de autenticação. Não copiar segredos ou estado de conta por
+uma regra genérica de backup ou para evitar uma reconexão necessária.
 
 - Escolher entre começar com perfis vazios ou reaproveitar os dados atuais.
   O original fica com o par Desktop/Code padrão; a cópia usa um par exclusivo.

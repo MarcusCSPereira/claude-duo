@@ -63,6 +63,10 @@ person using Claude to interact with the Claude Code CLI.
   Desktop/Code paths reserved for the original, including physical/case aliases.
   Policy changes affect the expected launcher and content-record binding.
   Headerless configs preserve the legacy policy until reviewed transition.
+- Support opt-in `@apps user` for a pre-existing private, physical, owned
+  `~/Applications` directory. No arbitrary destination or environment override;
+  source remains `/Applications/Claude.app`. Bind this location to launcher and
+  content verification. Existing configs keep the system destination.
 - Install pinned toolsets into private retained release directories, preflight
   Bash/C, publish a compatible dispatcher and switch the active pointer by
   atomic rename. Every dispatched operation verifies and pins one full release.
@@ -99,6 +103,16 @@ It and its ancestors must be user-owned, without group/other write permissions
 or custom allow ACLs. Data-directory ancestors have the same policy. Do not
 blindly remove corporate ACLs or change permissions on shared folders to make
 validation pass; use an approved private location or the official app.
+
+`@apps user` (once, before instance rows) requires an existing `~/Applications`
+directory with exact mode 0700, including no special permission bits, and safe
+owned ancestors/ACLs. It does not create the directory or change its permissions.
+`@apps system` explicitly selects the legacy `/Applications` destination.
+No directive preserves that default. Changing location is not migration: old
+apps/launchers remain and must not share profiles with the new copy. Maintenance
+locks are per selected app directory, not cross-directory profile locks. Use one
+reviewed configuration/location per deployment. See the
+[isolated GUI test plan](docs/GUI_VALIDATION_PT_BR.md).
 
 Custom providers, API credentials, endpoint overrides and proxy overrides are
 unsupported in this subscription mode. A required inherited proxy causes a
