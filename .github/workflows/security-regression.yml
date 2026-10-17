@@ -1,0 +1,44 @@
+name: Security regression fixtures
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-fixtures-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixtures:
+    name: Fixtures (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Record fixture platform
+        run: |
+          sw_vers
+          uname -m
+          /bin/bash --version
+          python3 --version
+      - name: Check Bash syntax
+        run: |
+          for script in bin/*.sh; do
+            /bin/bash -n "$script" || exit 1
+          done
+      - name: Check launch-agent plist
+        run: plutil -lint launchd/*.plist
+      - name: Run offline regression fixtures
+        run: python3 -m unittest discover -s tests -v
