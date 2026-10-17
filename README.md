@@ -4,6 +4,9 @@ This local revision includes script hardening and regression tests. Read
 [HARDENING.md](HARDENING.md) before installing; it describes stricter config
 validation, safe rebuild behavior, migration, and the signing/isolation limits
 that remain. Copy the shared `claude-instances-common.sh` with the other scripts.
+The [deeper limitation review and roadmap](docs/LIMITATIONS_AND_ROADMAP.md)
+includes controlled evidence and the proposed GUI launch architecture; it does
+not claim that all remaining limitations have been fixed.
 
 Run as many Claude Desktop instances as you like — personal, work, a client account, a
 scratch profile — side by side, each with its own account, its own profile, and its own
@@ -70,10 +73,13 @@ Every additional Code account must use a distinct `CLAUDE_CONFIG_DIR`; otherwise
 configuration validation fails. Only one instance may use the default `~/.claude`.
 `--list` displays variable names without revealing their values.
 
-**This is the only way to give an instance its own environment.** A macOS `.app` does not
-inherit your shell environment, so `export` in `.zshrc` has no effect on a Dock launch.
-Because the variables are set before `exec`, everything the app spawns inherits them —
-including Claude Code in agent mode.
+Use this column for variables explicitly set by this launcher before `exec`.
+Code sessions can also load selected variables from shell initialization and
+their local environment editor/settings, so `.zshrc` is not universally
+irrelevant to GUI Code. Parent-process exports alone do not prove the effective
+configuration of every Code session. See the official
+[local environment documentation](https://code.claude.com/docs/en/desktop#local-sessions)
+and the [residual limitation analysis](docs/LIMITATIONS_AND_ROADMAP.md).
 
 The motivating case is `CLAUDE_CONFIG_DIR`. Claude Code reads hooks from
 `$CLAUDE_CONFIG_DIR/settings.json` and stores agent-mode session history in

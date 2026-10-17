@@ -36,6 +36,10 @@ history. Assign a unique `CLAUDE_CONFIG_DIR` to every additional Code account.
 
 ## Remaining limits
 
+See [Residual limitations and improvement proposal](docs/LIMITATIONS_AND_ROADMAP.md)
+for the deeper review, controlled evidence, release gates, and a proposed
+unchanged-vendor-app launch mode. These are proposals, not implemented fixes.
+
 Copies still use ad-hoc signing and lose the original main executable's hardened
 runtime/Team ID. These changes do not restore Anthropic notarization or make the
 copies official. Signing the copies with a personal certificate would not grant
@@ -48,6 +52,12 @@ races but cannot prevent another program from starting or changing files after
 a check. Replacing two directories is not an atomic exchange across both
 renames; failure restoration preserves the old app in ordinary failure cases,
 not every crash/power-loss scenario.
+
+Configuration separation does not prove that every GUI Code credential,
+project setting, MCP server or environment source is separate. The current
+environment denylist and directory checks also have residual gaps documented
+in the proposal. Bundle verification establishes local signature consistency
+and an expected launcher, not an authenticated content manifest for all code.
 
 Copies still need maintenance after Claude updates. In-app updates in copies
 must be avoided. GUI Code authentication/SSO and session continuity should be
