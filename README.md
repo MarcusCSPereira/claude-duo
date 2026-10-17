@@ -275,9 +275,9 @@ claude-apps-refresh.sh personal    # or any instance name, or with no argument f
 
 If the source itself is broken, reinstall Claude, then rebuild.
 
-Rebuild/recovery, cache cleanup and checkpoints require macOS 12+ and Xcode
-Command Line Tools. Install the whole `bin/claude-*` set, including all workers
-and C sources. A shared kernel lock holds
+Rebuild/recovery, full verification/watchdog, cache cleanup and checkpoints
+require macOS 12+ and Xcode Command Line Tools. Install the whole `bin/claude-*`
+set, including all workers, C sources and the maintenance header. A shared kernel lock holds
 across the worker/children and releases on exit; do not remove its persistent
 `.claude-instances.lock` file to force another build. Old `.refresh-lock`
 directories still require inspection. Retained bundles are not automatically
@@ -322,11 +322,16 @@ claude-apps-refresh.sh --verify
 ```
 
 ```
-Claude Personal: local launcher/signature checks passed (ad-hoc copy; full resource provenance and account isolation not established)
+Claude Personal: launcher/signature/content-record checks passed (ad-hoc copy; user-writable record; account isolation not established)
 Claude Enterprise: FAILED -- rebuild required
 ```
 
 Exit 1 if any instance was clobbered. The fix is always the same — rebuild it.
+
+Verification also requires a private full-tree build record: an added/modified
+resource followed by local re-signing still fails. Missing legacy records need
+a rebuild; no new baseline is silently trusted. See [APP_INTEGRITY.md](docs/APP_INTEGRITY.md)
+for the exact transformations and remaining user-writable-record limits.
 
 *(Reasoned from the bundle's updater machinery and signing state, not observed: at the
 time of writing there was no pending update to test against.)*
@@ -641,6 +646,7 @@ claude-instance-check.sh
 |---|---|
 | Instance config | `~/.config/claude-instances/instances.conf` |
 | Icon masters | `~/.local/share/claude-instances/<name>.icns` |
+| Private app content records | `~/.local/share/claude-instances/integrity/<UUID>/record.txt` |
 | Scripts and native helper sources | `~/bin/claude-*` |
 | Verified content checkpoints | `~/Library/Application Support/Multi Claude Desktop/Checkpoints/<UUID>` |
 | Legacy backups (unverified; not imported) | `~/Library/Application Support/Claude*.backup-*` |

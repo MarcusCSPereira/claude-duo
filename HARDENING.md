@@ -24,7 +24,11 @@ person using Claude to interact with the Claude Code CLI.
 - Apply private-directory checks to icons/locks and watchdog logs. Refuse
   symlinked icon masters and symlinked/hardlinked watchdog logs.
 - Verify the original and staged app against Anthropic's Developer ID team and
-  bundle identifier. Require Gatekeeper acceptance of the source.
+  bundle identifier. Require source Gatekeeper acceptance and recursive nested
+  verification on all architectures. Compare unchanged resources to the source,
+  validate planned plist changes and record the final full tree before app
+  publication. Local re-signing cannot hide drift while the private record is
+  trusted. See [APP_INTEGRITY.md](docs/APP_INTEGRITY.md).
 - Build and verify in a private directory on the destination volume. Publish
   with native `RENAME_SWAP` for a replacement or `RENAME_EXCL` for a first
   install, using directory descriptors and no-follow flags. There is no
@@ -43,7 +47,12 @@ person using Claude to interact with the Claude Code CLI.
   exclusively. Pending/partial copies cannot pass published verification; there
   is no restore command. See [PROFILE_CHECKPOINTS.md](docs/PROFILE_CHECKPOINTS.md).
 - Fail closed if process enumeration fails. Stop cache cleanup if any observed
-  Claude process shares the profile, including stock Claude using Personal.
+  Desktop app/helper is active. Native guards use PID/path/start time without
+  argv/environment reads. Cache cleanup preflights fixed slots, quarantines
+  exclusively and deletes through descriptors, without path-based `rm -rf`.
+  See [NATIVE_MAINTENANCE.md](docs/NATIVE_MAINTENANCE.md).
+- Fix every entry/worker's PATH before resolving tools; privileged-mode Bash
+  ignores inherited startup files/functions.
 - Create/restrict profile and Code config directories to mode 0700. Restrict
   the watchdog directory/log to 0700/0600. Status explicitly describes the
   limits of version comparison and local launcher/signature checks.
@@ -52,8 +61,9 @@ person using Claude to interact with the Claude Code CLI.
 - Validate icon hue, including finite Swift numbers.
 
 Copy **all** `bin/claude-*` files when installing: the entry script now needs
-the shared library, all internal workers and both C sources in the same
-directory. Rebuild/recovery, cache cleanup and checkpoints require macOS 12+ and Xcode Command Line Tools;
+the shared library, all internal workers, all C sources and the maintenance
+header in the same directory. Rebuild/recovery, verification/watchdog, cache
+cleanup and checkpoints require macOS 12+ and Xcode Command Line Tools;
 the native helper is compiled locally in a private temporary directory, with
 no downloaded binary or Python runtime dependency. Daily app launching does
 not compile it. A normal rebuild is needed to
@@ -154,8 +164,9 @@ Configuration separation does not prove that every GUI Code credential,
 project setting, MCP server or environment source is separate. The minimal
 parent environment does not control Code's later shell/local/project/managed
 configuration layers. Profile path/permission observations are not descriptor-based
-locks and cannot defeat a racing process of the same user. Bundle verification establishes local signature consistency
-and an expected launcher, not an authenticated content manifest for all code.
+locks and cannot defeat a racing process of the same user. Bundle verification
+checks the full local build record, signature and expected launcher; the
+user-writable record is not an authenticated manifest against that same owner.
 
 Copies still need maintenance after Claude updates. In-app updates in copies
 must be avoided. GUI Code authentication/SSO and session continuity should be

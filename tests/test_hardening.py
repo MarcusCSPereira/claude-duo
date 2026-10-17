@@ -29,6 +29,8 @@ class HardeningTests(unittest.TestCase):
         self.source = self.apps / "Claude.app"
         (self.source / "Contents/MacOS").mkdir(parents=True)
         (self.source / "Contents/Resources").mkdir()
+        (self.source / "Contents/_CodeSignature").mkdir()
+        (self.source / "Contents/_CodeSignature/CodeResources").write_text("synthetic signature resources")
         self.info = {
             "CFBundleIdentifier": "com.anthropic.claudefordesktop",
             "CFBundleShortVersionString": "1.0.fixture",
@@ -55,6 +57,7 @@ class HardeningTests(unittest.TestCase):
             self.env.pop(key, None)
         for src in (REPO / "bin").glob("*.sh"):
             code = src.read_text().replace("$HOME", "$MULTI_CLAUDE_TEST_HOME")
+            code = code.replace("PATH=/usr/bin:/bin:/usr/sbin:/sbin\n", "PATH=" + str(self.bin) + ":/usr/bin:/bin:/usr/sbin:/sbin\n")
             code = code.replace("/Applications", str(self.apps))
             code = code.replace("CI_PB=/usr/libexec/PlistBuddy", "CI_PB=" + str(self.bin / "pb"))
             code = code.replace("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "/usr/bin/true")
@@ -62,7 +65,9 @@ class HardeningTests(unittest.TestCase):
             code = code.replace("/usr/bin/id", str(self.bin / "id"))
             code = code.replace('"$CI_TX_HELPER" publish', '"' + str(self.bin / "tx-publish") + '" "$CI_TX_HELPER" publish')
             (self.bin / src.name).write_text(code)
-        shutil.copyfile(REPO / "bin/claude-transaction.c", self.bin / "claude-transaction.c")
+        (self.bin / "claude-transaction.c").write_text("#define MCD_PROCESS_FIXTURE\n" + (REPO / "bin/claude-transaction.c").read_text())
+        shutil.copyfile(REPO / "bin/claude-maintenance.h", self.bin / "claude-maintenance.h")
+        shutil.copyfile(REPO / "bin/claude-integrity.c", self.bin / "claude-integrity.c")
         mocks = {
             "id": '#!/bin/bash\n[ "${MOCK_ID_FAIL:-}" != 1 ] || exit 99\nif [[ "$1" == -u && "${MOCK_ROOT:-}" == 1 ]]; then echo 0; else exec /usr/bin/id "$@"; fi\n',
             "ps": '''#!/bin/bash
@@ -82,6 +87,7 @@ for arg in "$@"; do
 done
 if [[ "$*" == *"-R "* && "${MOCK_SOURCE_BAD:-}" == 1 ]]; then exit 1; fi
 if [[ "$1" == --force && "${MOCK_SIGN_BAD:-}" == 1 ]]; then exit 1; fi
+if [[ "$*" == *"--deep "* && "${MOCK_NESTED_BAD:-}" == 1 ]]; then exit 1; fi
 exit 0
 ''',
             "spctl": '#!/bin/bash\n[ "${MOCK_GATEKEEPER_BAD:-}" != 1 ]\n',
@@ -140,6 +146,19 @@ exec "$@"
         self.assertEqual(self.run_script("--verify").returncode, 0)
         for path in [self.profile('profile one'), self.code('code one')]:
             self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+
+    def test_maintenance_resets_inherited_path_before_resolving_commands(self):
+        hostile = self.root / "hostile-bin"
+        hostile.mkdir()
+        marker = self.root / "unexpected-tool-executed"
+        for name in ("dirname", "codesign", "cp", "clang", "ps"):
+            tool = hostile / name
+            tool.write_text('#!/bin/bash\n: > "' + str(marker) + '"\nexit 99\n')
+            tool.chmod(0o755)
+        self.env["PATH"] = str(hostile) + ":" + self.env["PATH"]
+        self.build()
+        self.assertEqual(self.run_script("--verify").returncode, 0)
+        self.assertFalse(marker.exists())
 
     def test_invalid_names_and_traversal_rejected_before_mutation(self):
         for name in ["X/../../victim", "bad name", "../Claude", "A$(touch marker)", "-bad"]:

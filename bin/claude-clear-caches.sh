@@ -1,4 +1,6 @@
 #!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 # Serialize cleanup with rebuilds and profile checkpoints before any mutation.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"

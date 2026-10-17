@@ -175,6 +175,10 @@ ci_app_path() { printf '%s/Claude %s.app\n' "$CI_APPS" "$1"; }
 ci_version() { "$CI_PB" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 # 0=running, 1=not running, 2=unknown. Observation errors must stop mutations.
 ci_app_running() {
+    if [ -n "${CI_TX_HELPER:-}" ]; then
+        [ -f "$CI_TX_HELPER" ] && [ ! -L "$CI_TX_HELPER" ] && [ -x "$CI_TX_HELPER" ] && [ -O "$CI_TX_HELPER" ] || return 2
+        "$CI_TX_HELPER" app-state "$1"; return $?
+    fi
     local snapshot pid executable line
     snapshot="$(ps -Aww -o pid=,comm=)" || return 2
     while IFS= read -r line; do
@@ -188,6 +192,13 @@ ci_require_stopped() {
     local rc
     ci_app_running "$1"; rc=$?
     case "$rc" in 1) return 0 ;; 0) ci_error "quit $1 with Cmd-Q first" ;; *) ci_error 'cannot inspect processes; refusing to continue' ;; esac
+    return 1
+}
+ci_require_desktop_idle() {
+    local state
+    [ -n "${CI_TX_HELPER:-}" ] && [ -f "$CI_TX_HELPER" ] && [ ! -L "$CI_TX_HELPER" ] && [ -x "$CI_TX_HELPER" ] && [ -O "$CI_TX_HELPER" ] || { ci_error 'native lifecycle helper required'; return 1; }
+    "$CI_TX_HELPER" desktop-idle; state=$?
+    case "$state" in 1) return 0 ;; 0) ci_error 'quit all Claude Desktop apps and helpers first' ;; *) ci_error 'native process observation unknown; refusing maintenance' ;; esac
     return 1
 }
 ci_profile_of_pid() {
@@ -240,6 +251,22 @@ ci_render_launcher() {
         printf '"$HERE/Claude" --user-data-dir="$DATA_DIR"\n'
     fi
 }
+ci_compile_integrity() {
+    local build_dir="$1" bin_dir
+    ci_prepare_private_directory "$CI_ICONS/integrity" || return 1
+    bin_dir="$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)" || return 1
+    [ -f "$bin_dir/claude-integrity.c" ] && [ ! -L "$bin_dir/claude-integrity.c" ] || { ci_error 'missing integrity source; install the complete bin/claude-* set'; return 1; }
+    /usr/bin/clang -std=c11 -Wall -Wextra -Werror -O2 -mmacosx-version-min=12.0 -framework CoreFoundation "$bin_dir/claude-integrity.c" -o "$build_dir/integrity" || { ci_error 'integrity helper compilation failed'; return 1; }
+    CI_INTEGRITY_HELPER="$build_dir/integrity"; export CI_INTEGRITY_HELPER
+}
+ci_integrity_binding() {
+    local idx="$1" result
+    result="$(printf '%s\0' MCD_BUILD_CONFIG_1 "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}" | /usr/bin/shasum -a 256)" || return 1
+    printf '%s\n' "${result%% *}"
+}
+ci_integrity_helper_valid() {
+    [ -n "${CI_INTEGRITY_HELPER:-}" ] && [ -f "$CI_INTEGRITY_HELPER" ] && [ -x "$CI_INTEGRITY_HELPER" ] && [ ! -L "$CI_INTEGRITY_HELPER" ] && [ -O "$CI_INTEGRITY_HELPER" ] || { ci_error 'compiled integrity helper required; use the public entry script'; return 1; }
+}
 ci_verify_one() {
     local app="$1" idx="$2" id executable
     [ -d "$app" ] && [ ! -L "$app" ] || { ci_error "missing or symlinked app: $app"; return 1; }
@@ -249,7 +276,9 @@ ci_verify_one() {
     [ -f "$app/Contents/MacOS/launcher" ] && [ ! -L "$app/Contents/MacOS/launcher" ] && [ -x "$app/Contents/MacOS/launcher" ] || return 1
     # Compare bytes, never evaluate or run the inspected launcher.
     cmp -s "$app/Contents/MacOS/launcher" <(ci_render_launcher "$idx") || { ci_error 'launcher differs from expected configuration'; return 1; }
-    codesign --verify --strict "$app" || return 1
+    codesign --verify --deep --strict --all-architectures "$app" || return 1
+    ci_integrity_helper_valid || return 1
+    "$CI_INTEGRITY_HELPER" verify "$CI_ICONS/integrity" "$app" "$(ci_integrity_binding "$idx")" || return 1
 }
 
 ci_status() {

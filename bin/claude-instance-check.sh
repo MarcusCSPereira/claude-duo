@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 # Exit 0=observed healthy, 1=collision, 2=cannot determine state.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"

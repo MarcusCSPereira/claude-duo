@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 # Read-only app checks; local log and notification. Never rebuilds or quits apps.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"
@@ -15,6 +17,12 @@ if [ -e "$LOG" ] || [ -L "$LOG" ]; then
 fi
 : >> "$LOG" || exit 1
 /bin/chmod 600 "$LOG" || exit 1
+ci_prepare_private_directory "$CI_ICONS" || exit 1
+compile_dir="$(mktemp -d "$CI_ICONS/.watch-native.XXXXXXXX")" || exit 1
+trap 'rm -rf "$compile_dir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ci_compile_integrity "$compile_dir" || exit 1
 source_version="$(ci_version "$CI_SRC")" || { ci_error 'source version unavailable'; exit 1; }
 rc=0; problems=""
 for i in "${!names[@]}"; do

@@ -89,6 +89,34 @@ new staging/publication. Signature/Claude process observations remain mocked;
 this does not validate real account contents or login. Sanitized results and
 tested code hashes are in [evidence/profile-checkpoints.json](evidence/profile-checkpoints.json).
 
+## Implemented integrity and native maintenance follow-up
+
+The new builder authenticates the source and its nested code, checks unchanged
+resources, validates the planned plist transformation and creates a private
+full-tree record before atomic publication. Verification, watchdog and checkpoint
+prerequisites now reject content/structure/mode drift even after local
+re-signing. All entry/worker scripts fix PATH before command resolution.
+See [APP_INTEGRITY.md](APP_INTEGRITY.md) for the exact allowlist, signed-script
+detached metadata and local-record trust boundary. Records remain user-writable;
+there is no claim of authenticated provenance against that owner.
+
+Mutating workers now use native PID/path/start-time observations, without
+argv/environment reads, and require all observed Desktop apps/helpers closed.
+Cache cleanup requires the shared inherited lock, independently validates profile
+locations, preflights fixed slots, moves them exclusively into private quarantine
+and removes through no-follow descriptors. Uncertainty retains quarantine rather
+than replaying/deleting a guessed path. See [NATIVE_MAINTENANCE.md](NATIVE_MAINTENANCE.md).
+Read-only textual profile diagnostics and the inability to exclude external
+writers remain limitations. No installed app/profile was changed.
+
+This milestone passed **106 offline tests**, including real descriptor cleanup
+faults and production PID/path observations on a tiny fixture executable. An
+isolated copy of real Claude 2.42304.0 also passed source/nested/Gatekeeper,
+build/content checks and an inert-resource re-sign test: the new local signature
+passed while content-record verification rejected the drift. Original critical
+bytes/signature stayed unchanged; no vendor executable was launched or account
+used. See [evidence/integrity-maintenance.json](evidence/integrity-maintenance.json).
+
 ## Threat model and evidence limits
 
 We can reduce accidental configuration mixing, unsafe imports, corrupted or
@@ -345,7 +373,7 @@ S/M/L is relative scope, not a calendar estimate.
 Suggested follow-up PRs: (1) environment/path policy, (2) lifecycle evidence and
 truthful status, (3) unchanged-app experiment, (4) native transaction/recovery,
 (5) distribution/GUI. Gate each architectural switch on observed behavior.
-The current 60 tests remain regression coverage, not a security percentage.
+The regression tests remain behavior coverage, not a security percentage.
 
 ## What cannot be fixed solely in this repository
 

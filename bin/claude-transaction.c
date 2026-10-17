@@ -1,4 +1,5 @@
-// macOS-only, unprivileged bundle publication. No profile or credential access.
+// macOS-only publication, process metadata and cache-only maintenance.
+// Never reads profile credentials or process argv/environment.
 // The immutable journal records inode identities; it is not a trust certificate.
 #include <sys/acl.h>
 #include <sys/file.h>
@@ -287,18 +288,23 @@ static void publish(int root, int stage, const char *instance) {
     sync_descriptor(root);
     if (strcmp(state(root, stage, &record), "COMMITTED")) fail("publication could not be confirmed");
 }
+#include "claude-maintenance.h"
 int main(int argc, char **argv) {
     umask(077);
     if (!getuid() || getuid() != geteuid()) fail("run as the ordinary user, without sudo or setuid");
-    if (argc < 3) fail("usage: helper run|locked|publish|inspect APPLICATIONS [TRANSACTION INSTANCE]");
+    if (argc == 2 && !strcmp(argv[1], "desktop-idle")) return maintenance_process_state(NULL);
+    if (argc == 3 && !strcmp(argv[1], "app-state")) return maintenance_process_state(argv[2]);
+    if (argc < 3) fail("usage: helper run|locked|clean|publish|inspect APPLICATIONS [PROFILE|TRANSACTION INSTANCE]");
     const char *command = argv[1];
-    bool run = !strcmp(command, "run"), locked = !strcmp(command, "locked");
-    if ((!run && !locked && strcmp(command, "publish") && strcmp(command, "inspect")) ||
+    bool run = !strcmp(command, "run"), locked = !strcmp(command, "locked"), clean = !strcmp(command, "clean");
+    if ((!run && !locked && !clean && strcmp(command, "publish") && strcmp(command, "inspect")) ||
+        (clean && argc != 4) ||
         (run && argc < 4) || (locked && argc != 3) || (!strcmp(command, "publish") && argc != 5) || (!strcmp(command, "inspect") && argc != 4))
         fail("invalid command or argument count");
     int root = open_root(argv[2]);
-    lock_root(root, locked);
+    lock_root(root, locked || clean);
     if (locked) return 0;
+    if (clean) { cache_clean(argv[3]); return 0; }
     if (run) {
         char resolved[PATH_MAX];
         if (!realpath(argv[0], resolved)) system_fail("cannot resolve helper executable");

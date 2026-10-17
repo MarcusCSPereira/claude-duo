@@ -12,10 +12,14 @@ held on inherited descriptor 9 across the worker and children; it is not tied
 to a PID file or a directory that becomes stale. The named lock file remains
 after exit and must not be removed to bypass an active lock.
 
-The worker checks the original signature/Gatekeeper, copies into a private
+The worker checks the original identity/nested signature/Gatekeeper, copies into
+a private
 `.claude-txn.XXXXXXXX` directory on the destination volume, edits/signs/verifies
-the candidate and checks that the destination app is stopped. The native
-helper opens root/stage directories without symlinks, checks ownership/modes
+the candidate and checks that the destination app is stopped. The worker
+also checks planned source changes and persists a private full-tree build
+record selected by the app's UUID marker before publication. See
+[APP_INTEGRITY.md](APP_INTEGRITY.md). The native helper opens root/stage
+directories without symlinks, checks ownership/modes
 and ACLs, and writes the immutable `transaction.txt` with exclusive creation.
 The file is 0600, the directory 0700. Its versioned, canonical text records an
 ASCII instance name and root/stage/old/new device and inode identities. It
@@ -83,5 +87,5 @@ from a filename, timestamp or version string.
 - A retained bundle is not necessarily known-good, a profile backup, a project
   checkpoint or a Keychain export. Opening a newer app may migrate profiles.
   Compatible closed-profile backup/restore and rollback gates remain pending.
-- Rebuild/recovery requires macOS 12+, Xcode Command Line Tools and filesystem
+- Rebuild/recovery and full verification require macOS 12+, Xcode Command Line Tools and filesystem
   support for the requested operations. Daily graphical app launch is unchanged.

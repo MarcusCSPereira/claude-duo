@@ -40,5 +40,12 @@ jobs:
           done
       - name: Check launch-agent plist
         run: plutil -lint launchd/*.plist
+      - name: Analyze native helpers
+        run: |
+          for source in bin/*.c; do
+            /usr/bin/clang --analyze -std=c11 -Wall -Wextra -Werror \
+              -mmacosx-version-min=12.0 -Xanalyzer -analyzer-werror \
+              "$source" -o "$RUNNER_TEMP/$(basename "$source").plist" || exit 1
+          done
       - name: Run offline regression fixtures
         run: python3 -m unittest discover -s tests -v

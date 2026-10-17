@@ -294,7 +294,7 @@ class CheckpointPolicyTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.fixture.build()
         signature = self.fixture.app / "Contents/_CodeSignature"
-        signature.mkdir()
+        signature.mkdir(exist_ok=True)
         (signature / "CodeResources").write_text("synthetic signature resources")
         (self.fixture.profile("profile one") / "state").write_text("synthetic desktop")
         (self.fixture.code("code one") / "settings").write_text("synthetic code")

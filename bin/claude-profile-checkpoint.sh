@@ -1,4 +1,6 @@
 #!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 # Opt-in content checkpoints. Never restores, migrates or launches an account.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"
@@ -15,6 +17,7 @@ compile_dir="$(mktemp -d "$CI_ICONS/.checkpoint-native.XXXXXXXX")" || exit 1
 trap 'rm -rf "$compile_dir"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+ci_compile_integrity "$compile_dir" || exit 1
 bin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 for native in claude-transaction claude-checkpoint; do
     [ -f "$bin_dir/$native.c" ] && [ ! -L "$bin_dir/$native.c" ] || { ci_error 'install the complete bin/claude-* set'; exit 1; }

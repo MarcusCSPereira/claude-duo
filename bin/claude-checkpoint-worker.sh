@@ -1,4 +1,6 @@
 #!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 # Internal worker; caller retains the same lock as application publication.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/claude-instances-common.sh"
@@ -49,8 +51,7 @@ idle() {
     # stock/default instance. A process inspection error is never "stopped".
     ci_require_stopped "$CI_SRC" || return 1
     for i in "${!names[@]}"; do ci_require_stopped "$(ci_app_path "${names[$i]}")" || return 1; done
-    ci_profile_in_use "$desktop"; rc=$?
-    [ "$rc" -eq 1 ] || { ci_error 'Desktop profile is in use or process state is unknown'; return 1; }
+    ci_require_desktop_idle || return 1
     # A sandbox/permission failure may look exactly like "no matches". First
     # require visibility of a file held open by this very shell (no account data).
     printf 'observation capability probe\n' >"$observation/probe" || return 1
