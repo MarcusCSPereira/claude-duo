@@ -60,7 +60,9 @@ class HardeningTests(unittest.TestCase):
             code = code.replace("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "/usr/bin/true")
             code = code.replace("/usr/bin/osascript", str(self.bin / "osascript"))
             code = code.replace("/usr/bin/id", str(self.bin / "id"))
+            code = code.replace('"$CI_TX_HELPER" publish', '"' + str(self.bin / "tx-publish") + '" "$CI_TX_HELPER" publish')
             (self.bin / src.name).write_text(code)
+        shutil.copyfile(REPO / "bin/claude-transaction.c", self.bin / "claude-transaction.c")
         mocks = {
             "id": '#!/bin/bash\n[ "${MOCK_ID_FAIL:-}" != 1 ] || exit 99\nif [[ "$1" == -u && "${MOCK_ROOT:-}" == 1 ]]; then echo 0; else exec /usr/bin/id "$@"; fi\n',
             "ps": '''#!/bin/bash
@@ -87,9 +89,9 @@ exit 0
 if [[ "${MOCK_PLIST_FAIL:-}" == 1 && "$2" == "Set :CFBundleIdentifier "* ]]; then exit 99; fi
 exec /usr/libexec/PlistBuddy "$@"
 ''',
-            "mv": '''#!/bin/bash
-if [[ "${MOCK_PUBLISH_FAIL:-}" == 1 && "$1" == */instance.app ]]; then exit 1; fi
-exec /bin/mv "$@"
+            "tx-publish": '''#!/bin/bash
+[ "${MOCK_PUBLISH_FAIL:-}" != 1 ] || exit 1
+exec "$@"
 ''',
             "cp": '#!/bin/bash\n[ "${MOCK_COPY_FAIL:-}" != 1 ] || exit 1\nexec /bin/cp "$@"\n',
             "open": '#!/bin/bash\nexit 0\n',
@@ -356,12 +358,13 @@ printf '%s|%s|%s|%s|%s|%s\\n' "${ANTHROPIC_API_KEY:-}" "${ANTHROPIC_BASE_URL:-}"
         self.build()
         sentinel = self.app / "sentinel"
         sentinel.write_text("keep")
+        retained = set(self.apps.glob(".claude-txn.*"))
         for flag in ["MOCK_COPY_FAIL", "MOCK_PLIST_FAIL", "MOCK_SIGN_BAD"]:
             with self.subTest(flag=flag):
                 self.env[flag] = "1"
                 self.assertNotEqual(self.run_script().returncode, 0)
                 self.assertEqual(sentinel.read_text(), "keep")
-                self.assertFalse(list(self.apps.glob(".claude-build.*")))
+                self.assertEqual(set(self.apps.glob(".claude-txn.*")), retained)
                 del self.env[flag]
 
     def test_failed_publication_restores_previous_app(self):
@@ -371,6 +374,67 @@ printf '%s|%s|%s|%s|%s|%s\\n' "${ANTHROPIC_API_KEY:-}" "${ANTHROPIC_BASE_URL:-}"
         self.env["MOCK_PUBLISH_FAIL"] = "1"
         self.assertNotEqual(self.run_script().returncode, 0)
         self.assertEqual(sentinel.read_text(), "keep")
+
+    def test_rebuild_retains_previous_bundle_and_recovery_only_observes(self):
+        self.build()
+        old_inode = self.app.stat().st_ino
+        (self.app / "retained-marker").write_text("previous")
+        self.build()
+        transactions = [p for p in self.apps.glob(".claude-txn.*")
+                        if (p / "instance.app/retained-marker").exists()]
+        self.assertEqual(len(transactions), 1)
+        previous = transactions[0] / "instance.app"
+        self.assertEqual(previous.stat().st_ino, old_inode)
+        self.assertNotEqual(self.app.stat().st_ino, old_inode)
+        before = (self.app.stat().st_ino, previous.stat().st_ino,
+                  (transactions[0] / "transaction.txt").read_bytes())
+        recovered = self.run_script("--recover", transactions[0].name)
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertIn("COMMITTED", recovered.stdout)
+        self.assertIn("No bundle/profile was restored", recovered.stdout)
+        self.assertEqual(before, (self.app.stat().st_ino, previous.stat().st_ino,
+                                  (transactions[0] / "transaction.txt").read_bytes()))
+
+    def test_failed_atomic_operation_retains_journal_for_prepared_recovery(self):
+        self.build()
+        old_inode = self.app.stat().st_ino
+        retained = set(self.apps.glob(".claude-txn.*"))
+        source = self.bin / "claude-transaction.c"
+        source.write_text("#define MCD_TRANSACTION_TESTING\n" + source.read_text())
+        self.env["MCD_TEST_RENAME_UNSUPPORTED"] = "1"
+        failed = self.run_script()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(self.app.stat().st_ino, old_inode)
+        transactions = set(self.apps.glob(".claude-txn.*")) - retained
+        self.assertEqual(len(transactions), 1)
+        transaction = transactions.pop()
+        self.assertTrue((transaction / "transaction.txt").exists())
+        recovered = self.run_script("--recover", transaction.name)
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertIn("PREPARED", recovered.stdout)
+        self.assertEqual(self.app.stat().st_ino, old_inode)
+
+    def test_recovery_refuses_tampered_published_launcher(self):
+        self.build()
+        transaction = next(self.apps.glob(".claude-txn.*"))
+        launcher = self.app / "Contents/MacOS/launcher"
+        launcher.write_text(launcher.read_text() + "\necho tampered\n")
+        self.assertNotEqual(self.run_script("--recover", transaction.name).returncode, 0)
+        self.assertTrue(launcher.exists())
+        self.assertTrue(transaction.exists())
+
+    def test_compiler_failure_leaves_existing_bundle_untouched(self):
+        self.build()
+        inode = self.app.stat().st_ino
+        entry = self.bin / "claude-apps-refresh.sh"
+        entry.write_text(entry.read_text().replace("/usr/bin/clang", "/usr/bin/false"))
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual(self.app.stat().st_ino, inode)
+
+    def test_production_build_has_no_environment_fault_injection(self):
+        self.env["MCD_TEST_RENAME_UNSUPPORTED"] = "1"
+        self.env["MCD_TEST_STOP"] = "journal-synced"
+        self.build()
 
     def test_unknown_process_state_blocks_rebuild_and_health_check(self):
         self.env["MOCK_PS_FAIL"] = "1"

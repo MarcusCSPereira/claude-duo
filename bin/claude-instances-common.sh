@@ -251,3 +251,16 @@ ci_verify_one() {
     cmp -s "$app/Contents/MacOS/launcher" <(ci_render_launcher "$idx") || { ci_error 'launcher differs from expected configuration'; return 1; }
     codesign --verify --strict "$app" || return 1
 }
+
+ci_status() {
+    local i app version source_version
+    source_version="$(ci_version "$CI_SRC")" || source_version=unavailable
+    printf '  %-24s %s\n' 'Claude.app (source)' "$source_version"
+    for i in "${!names[@]}"; do
+        app="$(ci_app_path "${names[$i]}")"
+        version="$(ci_version "$app")" || version='NOT BUILT'
+        printf '  %-24s %-14s' "Claude ${names[$i]}" "$version"
+        if [ "$version" = "$source_version" ]; then printf 'same version\n'; else printf 'rebuild required\n'; fi
+    done
+    printf 'Version comparison only; authenticity, GUI compatibility and account separation are not established by this status.\n'
+}
