@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "baseline_commit": "f7d957a8a28073b8681f114d29024fa9e75dea7a",
-  "time_utc": "2026-10-17T04:20:24.651179+00:00",
+  "time_utc": "2026-10-17T04:26:14.425895+00:00",
   "local_fixture_suite": {
     "count": 60,
     "native_transaction_tests": 14,
@@ -21,7 +21,8 @@
     "kernel_lock_released_after_sigkill": true,
     "unsupported_operation_has_no_weaker_fallback": true,
     "linked_or_malformed_journal_refused": true,
-    "unknown_layout_not_replayed_or_deleted": true
+    "unknown_layout_not_replayed_or_deleted": true,
+    "out_of_range_signed_noncanonical_and_extra_byte_records_refused": true
   },
   "source_app_version": "2.42304.0",
   "real_build_checks": [
@@ -74,7 +75,7 @@
     "bin/claude-recolor-icon.sh": "95ad7aafcdef7bb388a60f02585f1a6e8fe2eb815ff66218fa67f7655799378a",
     "bin/claude-recolor-icon.swift": "55fb1aafdfbd38690cf63c0e9d43b052acbb6e858b79d28ddcd8938a681dbb64",
     "bin/claude-stale-check.sh": "481244160f7017c3a987c40d0edb120264c2e73184898043970889337d799809",
-    "bin/claude-transaction.c": "a5e978ca0978c2d7fbeb30ad6ddc83640e69d40ba97b7762f7492d4119e9cb81"
+    "bin/claude-transaction.c": "d36220b0028e8778cb0c61176455f40c471502fb642f4fb0cdac790878b13d77"
   },
   "vendor_executable_launched": false,
   "claude_credentials_accessed": false,

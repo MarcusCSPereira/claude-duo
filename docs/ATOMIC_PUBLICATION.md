@@ -20,6 +20,8 @@ and ACLs, and writes the immutable `transaction.txt` with exclusive creation.
 The file is 0600, the directory 0700. Its versioned, canonical text records an
 ASCII instance name and root/stage/old/new device and inode identities. It
 contains no account tokens, environment values or profile contents.
+Numeric fields use checked unsigned conversions and canonical serialization;
+overflow, signs, extra bytes and noncanonical records are refused.
 
 The journal file and parent metadata are synced before the namespace operation.
 The helper verifies the prepared layout, then performs one

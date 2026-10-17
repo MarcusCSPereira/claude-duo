@@ -180,6 +180,28 @@ static void write_journal(int root, int stage, const struct record *record) {
     sync_descriptor(stage);
     sync_descriptor(root);
 }
+static void consume(const char **cursor, const char *literal) {
+    size_t length = strlen(literal);
+    if (strncmp(*cursor, literal, length)) fail("malformed journal");
+    *cursor += length;
+}
+static uint64_t number(const char **cursor) {
+    if (**cursor < '0' || **cursor > '9') fail("journal requires unsigned decimal integers");
+    errno = 0;
+    char *end;
+    uintmax_t value = strtoumax(*cursor, &end, 10);
+    if (errno == ERANGE || end == *cursor || value > UINT64_MAX) fail("journal integer out of range");
+    *cursor = end;
+    return (uint64_t)value;
+}
+static struct identity parse_identity(const char **cursor) {
+    struct identity value;
+    value.device = number(cursor);
+    consume(cursor, " ");
+    value.inode = number(cursor);
+    consume(cursor, "\n");
+    return value;
+}
 static struct record read_journal(int root, int stage) {
     int fd = openat(stage, JOURNAL, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) system_fail("journal missing or unreadable; no automatic repair");
@@ -198,13 +220,21 @@ static struct record read_journal(int root, int stage) {
     }
     close(fd);
     struct record record = {0};
-    int consumed = 0;
-    int fields = sscanf(buffer,
-        "MCD_TRANSACTION 1\ninstance %64[A-Za-z0-9_-]\nroot %" SCNu64 " %" SCNu64 "\nstage %" SCNu64 " %" SCNu64
-        "\nold %u %" SCNu64 " %" SCNu64 "\nnew %" SCNu64 " %" SCNu64 "\n%n",
-        record.instance, &record.root.device, &record.root.inode, &record.stage.device, &record.stage.inode,
-        &record.old_present, &record.old.device, &record.old.inode, &record.next.device, &record.next.inode, &consumed);
-    if (fields != 10 || consumed != (int)length || !valid_instance(record.instance) || record.old_present > 1 || !record.next.inode ||
+    const char *cursor = buffer;
+    consume(&cursor, "MCD_TRANSACTION 1\ninstance ");
+    const char *line_end = strchr(cursor, '\n');
+    if (!line_end || line_end - cursor < 1 || line_end - cursor > 64) fail("malformed journal instance");
+    memcpy(record.instance, cursor, (size_t)(line_end - cursor));
+    cursor = line_end + 1;
+    consume(&cursor, "root "); record.root = parse_identity(&cursor);
+    consume(&cursor, "stage "); record.stage = parse_identity(&cursor);
+    consume(&cursor, "old ");
+    uint64_t present = number(&cursor);
+    if (present > 1) fail("invalid old-bundle presence flag");
+    record.old_present = (unsigned)present;
+    consume(&cursor, " "); record.old = parse_identity(&cursor);
+    consume(&cursor, "new "); record.next = parse_identity(&cursor);
+    if (cursor != buffer + length || !valid_instance(record.instance) || !record.next.inode ||
         (record.old_present ? !record.old.inode : (record.old.device || record.old.inode))) fail("malformed journal");
     size_t expected = serialize(&record, canonical, sizeof(canonical));
     if (expected != length || memcmp(buffer, canonical, length)) fail("noncanonical journal");

@@ -206,6 +206,24 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(victim.read_text(), "unchanged")
         self.assertEqual((self.live / "marker").read_text(), "old")
 
+        journal.unlink()
+        self.assertEqual(self.publish().returncode, 0)
+        valid = journal.read_bytes()
+        malformed = [
+            valid.replace(b"root ", b"root 18446744073709551616 ", 1),
+            valid.replace(b"root ", b"root -1 ", 1),
+            valid.replace(b"old 1 ", b"old 4294967296 ", 1),
+            valid.replace(b"old 1 ", b"old 18446744073709551616 ", 1),
+            valid + b"\x00ignored",
+            valid.replace(b"MCD_TRANSACTION 1", b"MCD_TRANSACTION 01", 1),
+        ]
+        for content in malformed:
+            with self.subTest(content=content[:70]):
+                journal.write_bytes(content)
+                self.assertNotEqual(self.inspect().returncode, 0)
+                self.assertEqual((self.live / "marker").read_text(), "new")
+                self.assertEqual((self.candidate / "marker").read_text(), "old")
+
     def test_changed_bundle_identity_and_journal_directory_are_unknown(self):
         self.assertEqual(self.publish().returncode, 0)
         self.live.rename(self.root / "saved.app")
