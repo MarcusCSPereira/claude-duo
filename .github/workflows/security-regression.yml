@@ -15,11 +15,12 @@ concurrency:
 
 jobs:
   fixtures:
-    name: Fixtures (${{ matrix.os }})
+    name: Fixtures (${{ matrix.os }}, ${{ matrix.group }})
     strategy:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel]
+        group: [profiles, storage, toolsets]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -48,4 +49,6 @@ jobs:
               "$source" -o "$RUNNER_TEMP/$(basename "$source").plist" || exit 1
           done
       - name: Run offline regression fixtures
-        run: python3 -m unittest discover -s tests -v
+        # Groups are checked against full discovery before every run; new
+        # files cannot silently disappear from this matrix.
+        run: python3 scripts/run-security-tests.py "${{ matrix.group }}"

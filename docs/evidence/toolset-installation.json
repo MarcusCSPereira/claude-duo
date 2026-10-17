@@ -143,5 +143,33 @@
     "Automatic detection/wait/rebuild of Claude Duo after official updates remains unimplemented",
     "Modified Duo app remains ad-hoc signed without vendor identity/privileges",
     "No real two-account graphical Desktop/Code login, callback, SSO or continuity tests performed"
-  ]
+  ],
+  "ci_follow_up": {
+    "serial_run": "https://github.com/guibrbs/multi-claude-desktop/actions/runs/39075993710",
+    "serial_commit": "585424c90efcb412c9ee20395e1310278c87c506",
+    "apple_silicon": {
+      "result": "passed",
+      "tests": 137,
+      "test_seconds": 148.788
+    },
+    "intel": {
+      "result": "job timeout",
+      "completed_tests_before_cancel": 75,
+      "recorded_test_failures": 0,
+      "suite_incomplete": true
+    },
+    "change": "Split the same suite into disjoint profiles/storage/toolsets groups per architecture; keep 10-minute per-job bound",
+    "groups": {
+      "profiles": 53,
+      "storage": 59,
+      "toolsets": 25
+    },
+    "coverage_inventory": "Complete/disjoint against full discovery; unassigned synthetic probe was correctly rejected",
+    "group_runner_local": {
+      "group": "toolsets",
+      "tests": 25,
+      "result": "passed"
+    },
+    "production_source_changed": false
+  }
 }

@@ -198,3 +198,10 @@ check passes eight scratch build/signature/content/policy checks, with lifecycle
 observations simulated and no vendor execution. Exact tested source hashes,
 counts and remaining limits are in
 [evidence/toolset-installation.json](evidence/toolset-installation.json).
+
+CI runs the same suite in three groups per architecture: profiles (53), storage
+(59) and toolsets (25). Each group first verifies that their combined test IDs
+match full discovery exactly once. Unassigned new modules and duplicates fail
+the inventory check. This bounds each job without omitting cases; a serial
+Intel attempt exceeded its ten-minute job limit after 75 completed tests with
+no recorded test failure. The runtime sources were not changed for grouping.

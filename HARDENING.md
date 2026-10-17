@@ -202,3 +202,8 @@ test build enables failure/stop injection; production compilation ignores
 those environment variables. Tests kill disposable helper processes before
 and after exchange and inspect the resulting layouts. Real signatures must
 be validated separately outside restricted execution environments.
+
+CI partitions the full suite into profiles/storage/toolsets on each architecture.
+`python3 scripts/run-security-tests.py inventory` verifies complete, disjoint
+coverage against discovery; adding an unassigned module fails rather than
+silently losing its tests. Each job retains the ten-minute bound.
