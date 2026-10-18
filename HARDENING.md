@@ -112,7 +112,7 @@ No directive preserves that default. Changing location is not migration: old
 apps/launchers remain and must not share profiles with the new copy. Maintenance
 locks are per selected app directory, not cross-directory profile locks. Use one
 reviewed configuration/location per deployment. See the
-[isolated GUI test plan](docs/GUI_VALIDATION_PT_BR.md).
+[GUI validation plan](docs/GUI_VALIDATION_PT_BR.md).
 
 Custom providers, API credentials, endpoint overrides and proxy overrides are
 unsupported in this subscription mode. A required inherited proxy causes a

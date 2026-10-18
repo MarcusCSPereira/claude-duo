@@ -71,6 +71,12 @@ Sua prioridade continua sendo **segurança primeiro**. O protótipo de um novo
 gerenciador nativo está adiado. O caminho atual deve passar pelos testes antes
 de investirmos em outra interface.
 
+O usuário decidiu **não criar outro usuário no macOS**. O ensaio gráfico será
+na sessão habitual, com pastas novas para o Duo e o perfil existente do original.
+O [roteiro atualizado](GUI_VALIDATION_PT_BR.md) começa pela revisão de cópias e
+atalhos legados para evitar acesso simultâneo ao mesmo perfil padrão. Novas
+pastas não constituem isolamento do Chaveiro ou de arquivos do mesmo UID.
+
 Requisito adicional: reaproveitar no Duo as preferências, MCPs e plugins do
 original, pois a pessoa é a mesma. A [proposta de importação seletiva](PROFILE_REUSE_PT_BR.md)
 define o original como referência, preserva ajustes próprios do Duo e mantém
@@ -88,6 +94,9 @@ as pastas das duas contas.
 | Cópia de segurança dos perfis | Checkpoint opcional do par Desktop/Code com verificação de conteúdo | Sem restauração; formato restrito; exclui Chaveiro e projetos externos; conteúdo não criptografado |
 | Instalador e modo original + Duo | Conjunto completo verificado, versões retidas, ativação atômica do conjunto e operação em andamento vinculada à sua versão | Integração com instalação legada e interface de manutenção pendentes |
 | Testes automatizados atuais | 145 testes aprovados localmente; resultados remotos desta etapa registrados no PR | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
+| Duas contas no Code gráfico | Roteiro preparado; ensaio com contas reais não executado | Conta efetiva, retorno do link de e-mail e continuidade ainda precisam ser observados |
+| Reaproveitamento de preferências, MCPs e plugins | Proposta de importação seletiva documentada | Inventário, prévia, aplicação e sincronização ainda não implementados |
+| Reconstrução automática do Duo | Fluxo planejado; construtor manual e watchdog de verificação disponíveis | Detecção, espera e reconstrução automática após atualização oficial ainda não implementadas |
 | Base anterior de CI | 106 testes aprovados em Apple Silicon e Intel no commit `2d37bf6` | Evidência histórica, anterior ao instalador |
 | Claude Duo em pasta descartável | 8 checagens reais aprovadas, agora também no destino privado: origem oficial, construção, conteúdo/assinatura e reserva do perfil padrão | Observação de processos simulada; aplicativo não aberto; contas não usadas |
 | Aplicativo real na base anterior | 10 verificações aprovadas com Claude 2.42304.0, incluindo detecção de alteração após nova assinatura local | O executável do Claude não foi aberto e nenhuma conta foi usada nesses testes |
@@ -100,7 +109,8 @@ As evidências da base do instalador estão em
 [toolset-installation.json](evidence/toolset-installation.json). A etapa de
 preparação do laboratório, com os 145 testes e hashes atuais, está em
 [gui-preparation.json](evidence/gui-preparation.json). O destino privado foi
-ensaiado em pastas descartáveis; o usuário de teste do macOS ainda não foi criado.
+ensaiado em pastas descartáveis. O registro histórico precede a decisão de usar
+somente a sessão habitual; nenhum ensaio gráfico ou migração foi realizado.
 
 ## Ordem de execução
 
@@ -168,13 +178,14 @@ reais e converter os atalhos legados permanecem etapas separadas.
 - Separar nos diagnósticos: origem oficial, integridade da cópia, versão,
   compatibilidade gráfica e identidade da conta observada. Cada informação
   precisa indicar quando foi verificada ou se permanece desconhecida.
-- Preparar o ensaio do original e de uma cópia com dados inventados e projetos
-  descartáveis, em um usuário local Padrão de teste. Os dois apps ficam na mesma
-  sessão e o original exercita o perfil padrão dessa conta nova. `@apps user`
-  permite construir o Duo em `~/Applications` privado sem escrever nos apps
-  compartilhados. O [roteiro gráfico](GUI_VALIDATION_PT_BR.md) descreve a
-  preparação; criar a conta e entrar nela ainda depende do usuário. Conferir
-  destinos, registro de aplicativos, Dock e atalhos antes de abrir.
+- Preparar o ensaio do original e de uma cópia na sessão habitual do usuário,
+  com pastas novas para o Duo e projetos descartáveis. O original usa seu perfil
+  real existente; não apagá-lo para obter um cenário de primeira execução.
+  `@apps user` permite construir o Duo em `~/Applications` privado sem escrever
+  nos apps compartilhados. O [roteiro gráfico](GUI_VALIDATION_PT_BR.md) começa
+  pela revisão dos atalhos e da cópia Personal que pode compartilhar o padrão.
+  Conferir também manutenção legada concorrente, registro de aplicativos e Dock.
+  Não criar outro usuário no macOS nem trocar HOME.
 - Registrar versões exatas de macOS, arquitetura, Claude e ferramentas.
   O mínimo macOS 12 dos auxiliares não comprova suporte do próprio Claude.
 - Confirmar tipos de login necessários: pessoal, organização e SSO, se usado;
