@@ -11,7 +11,7 @@ shift
 "$CI_TX_HELPER" locked "$CI_APPS" || exit 1
 umask 077
 build_one() (
-    local idx="$1" name="${names[$1]}" dest stage bundle icon old_id build_id icon_changed=0
+    local idx="$1" name="${names[$1]}" dest stage bundle icon old_id build_id icon_changed=0 product_changed=0 asar_hash
     dest="$(ci_app_path "$name")"
     [ ! -L "$dest" ] || { ci_error 'refusing symlinked destination'; return 1; }
     if [ -e "$dest" ]; then
@@ -63,6 +63,15 @@ build_one() (
     build_id="$(/usr/bin/uuidgen | LC_ALL=C tr '[:upper:]' '[:lower:]')" || return 1
     printf '%s\n' "$build_id" > "$bundle/Contents/Resources/mcd-build-id" || return 1
     chmod 644 "$bundle/Contents/Resources/mcd-build-id" || return 1
+    if [ "$CI_MODE" = original-copy ]; then
+        # Own Electron app.name, hence its own "<productName> Safe Storage"
+        # Keychain item; the record below regenerates this from the source.
+        ci_integrity_helper_valid || return 1
+        asar_hash="$("$CI_INTEGRITY_HELPER" product-name "$bundle" "$name")" || return 1
+        [[ "$asar_hash" =~ ^[0-9a-f]{64}$ ]] || { ci_error 'unexpected archive header digest'; return 1; }
+        "$CI_PB" -c "Set :ElectronAsarIntegrity:Resources/app.asar:hash $asar_hash" "$bundle/Contents/Info.plist" || return 1
+        product_changed=1
+    fi
     ci_render_launcher "$idx" > "$bundle/Contents/MacOS/launcher" || return 1
     chmod 755 "$bundle/Contents/MacOS/launcher" || return 1
     plutil -lint "$bundle/Contents/Info.plist" >/dev/null || return 1
@@ -70,7 +79,7 @@ build_one() (
     codesign --force -s - "$bundle/Contents/MacOS/Claude" || return 1
     codesign --force -s - "$bundle" || return 1
     ci_integrity_helper_valid || return 1
-    "$CI_INTEGRITY_HELPER" record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" || return 1
+    "$CI_INTEGRITY_HELPER" record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" "$product_changed" || return 1
     ci_verify_one "$bundle" "$idx" || return 1
     ci_prepare_data_dir "${dirs[$idx]}" desktop || return 1
     ci_prepare_data_dir "${code_dirs[$idx]}" code || return 1

@@ -36,6 +36,12 @@ person using Claude to interact with the Claude Code CLI.
   validate planned plist changes and record the final full tree before app
   publication. Local re-signing cannot hide drift while the private record is
   trusted. See [APP_INTEGRITY.md](docs/APP_INTEGRITY.md).
+- In `original-copy` mode, give the copy its own `package.json` `productName`
+  (`Claude <name>`), so Electron uses a separate `<productName> Safe Storage`
+  Keychain item. The rewrite keeps the archive the same size and reseals
+  only that member's digests and the header hash. The integrity record
+  regenerates the expected archive from the source and requires byte
+  equality. See [the namespace notes](docs/KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md).
 - Build and verify in a private directory on the destination volume. Publish
   with native `RENAME_SWAP` for a replacement or `RENAME_EXCL` for a first
   install, using directory descriptors and no-follow flags. There is no

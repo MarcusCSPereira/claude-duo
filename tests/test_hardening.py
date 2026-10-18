@@ -4,16 +4,52 @@ Uses macOS Bash/PlistBuddy/plutil; signatures and process observations are mocke
 No change to the caller's HOME, no network, no registration of fixture apps.
 """
 import hashlib
+import json
 import os
 from pathlib import Path
 import plistlib
 import select
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def synthetic_asar(package=None, members=None, block_size=4194304):
+    """Small Electron-style archive: compact header, packed members, digests."""
+    if package is None:
+        package = b'{\n  "name": "@fixture/desktop",\n  "productName": "Claude",\n  "version": "1.0.0",\n  "main": "index.js"\n}\n'
+    if members is None:
+        members = {"index.js": b"console.log('synthetic vendor code');\n",
+                   "node_modules/dep/package.json": b'{"productName": "Claude", "name": "dep"}\n'}
+    files, payload = {}, b""
+
+    def entry(data):
+        nonlocal payload
+        blocks = [sha256(data[i:i + block_size]) for i in range(0, len(data), block_size)]
+        result = {"size": len(data), "offset": str(len(payload)),
+                  "integrity": {"algorithm": "SHA256", "hash": sha256(data), "blockSize": block_size, "blocks": blocks}}
+        payload += data
+        return result
+
+    for path, data in members.items():
+        node = files
+        parts = path.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {"files": {}})["files"]
+        node[parts[-1]] = entry(data)
+    files["package.json"] = entry(package)
+    raw = json.dumps({"files": files}, separators=(",", ":")).encode()
+    padding = bytes((-len(raw)) % 4)
+    size = 8 + len(raw) + len(padding)
+    return struct.pack("<4I", 4, size, size - 4, len(raw)) + raw + padding + payload, sha256(raw)
 
 
 class HardeningTests(unittest.TestCase):
@@ -41,6 +77,9 @@ class HardeningTests(unittest.TestCase):
             "CFBundleIconName": "electron",
             "CFBundleURLTypes": [], "NSUserActivityTypes": [],
         }
+        archive, header = synthetic_asar()
+        (self.source / "Contents/Resources/app.asar").write_bytes(archive)
+        self.info["ElectronAsarIntegrity"] = {"Resources/app.asar": {"algorithm": "SHA256", "hash": header}}
         (self.source / "Contents/Info.plist").write_bytes(plistlib.dumps(self.info))
         binary = self.source / "Contents/MacOS/Claude"
         binary.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\nprintf "CONFIG=%s VALUE=%s\\n" "${CLAUDE_CONFIG_DIR:-}" "${ANTHROPIC_API_KEY:-}"\n')

@@ -10,7 +10,9 @@ contas está bloqueado: [achado KC01](KEYCHAIN_FIRST_LAUNCH_PT_BR.md). O documen
 distingue testes descartáveis, preparação real e validação de contas pendente.
 Os [experimentos posteriores](KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md) encontraram
 um caminho para uma entrada com nome próprio, sem mudar a tela de login do
-Desktop; a integração de produção continua pendente. O bloqueio de liberação permanece.
+Desktop. O construtor de produção já aplica essa troca ao Duo, com verificação
+regenerada da origem; o Duo instalado ainda não foi reconstruído e as contas
+não foram testadas. O bloqueio de liberação permanece.
 
 ## Resultado que queremos
 

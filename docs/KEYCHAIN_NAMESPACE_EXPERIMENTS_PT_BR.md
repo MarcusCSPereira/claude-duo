@@ -100,17 +100,66 @@ Portanto, a “introdução anterior do Desktop” não era um estado comparáve
 troca de `productName` não mudou a tela de entrada. O User-Agent não foi medido.
 O login real continua não testado.
 
+## Integração no construtor de produção
+
+No modo `original-copy` (o Duo), o construtor agora dá à cópia o
+`productName` `Claude <nome>`, por exemplo `Claude Duo`. Com isso, o Electron
+procura a chave `Claude Duo Safe Storage`. O modo legado não muda: instalações
+antigas continuam com a mesma chave e não são deslogadas.
+
+Como funciona, em C, sem Python no uso diário:
+
+- **Mesmo tamanho.** No `package.json`, `"Claude"` vira `"Claude Duo"`, e o
+  mesmo número de bytes de espaço insignificante, fora de strings, é removido.
+  O arquivo mantém o tamanho, nenhum offset do ASAR se move e o cabeçalho
+  mantém o comprimento. Mudam só os hashes desse membro (hash e blocos) e, no
+  `Info.plist`, o hash `ElectronAsarIntegrity` do cabeçalho.
+- **Gravação só no staging.** `integrity product-name` grava num arquivo
+  exclusivo ao lado do `app.asar` e troca com `rename` atômico. Se falhar, o
+  arquivo temporário é apagado. Um temporário que sobrar de uma execução
+  interrompida faz a construção seguinte ser recusada.
+- **Verificação que não confia no staging.** O registro de integridade
+  **regenera o arquivo esperado a partir da origem** e exige igualdade byte a
+  byte com a cópia, com o hash do `Info.plist` conferido contra o cabeçalho.
+  Antes disso, ele recusa: hash de `package.json` da origem divergente de
+  qualquer bloco; mais de um `package.json` no topo; layout de entrada
+  diferente do compacto esperado (inclusive `unpacked`); payload compartilhado
+  com outro membro; `productName` diferente de `"Claude"`, duplicado, aninhado
+  ou com chave escapada; espaço insignificante insuficiente; e um
+  `ElectronAsarIntegrity` da origem que não confere com o cabeçalho. Uma
+  verificação semântica independente compara as formas sem espaço.
+- **Duo já instalado.** A política de vínculo passou para
+  `MCD_BUILD_CONFIG_ORIGINAL_COPY_2`. O Duo construído antes (`b938c7d`) falha
+  na verificação e precisa ser reconstruído para receber a correção.
+
+Validação:
+
+- 12 novos testes offline (`tests/test_product_name.py`): cópia com nome
+  próprio, digests e tamanho preservados; legado byte a byte igual; adulteração
+  pós-construção do JavaScript, do nome ou do hash do `Info.plist` detectada;
+  adulteração entre gravação e registro recusada antes da publicação; seis
+  pacotes e quatro layouts de arquivo não revisados recusados; vários blocos
+  re-selados; escrita interrompida por limite de tamanho e diretório sem
+  escrita deixam o arquivo intacto, sem temporário; nomes não validados
+  recusados; e atualização da origem com reconstrução.
+- O gravador em C, aplicado ao `app.asar` real do Claude 2.42304.0, foi aceito
+  pelo verificador Python independente do experimento: 508 membros, só
+  `productName` alterado, mesmo tamanho e 167 bytes diferentes.
+- Construção descartável real com o código novo: identidade, aninhamento e
+  Gatekeeper da origem; construção, verificação e assinatura aninhada do Duo;
+  reserva dos perfis padrão; e arquivos críticos da origem inalterados. Nenhum
+  app foi aberto e nenhum perfil real foi usado.
+
+O Duo instalado em `~/Applications` **não foi reconstruído**. Isso é uma
+mudança no seu sistema e fica para a sua decisão.
+
 ## O que falta antes de integrar
 
 1. ~~Preservar a experiência Desktop~~ **descartado em 17/10/2026, 22:07.**
    A suspeita de uma página web diferente não se confirmou (ver
    [reabertura](#reabertura-e-comparação-por-logs)).
-2. **Integrar verificações ao construtor de produção.** Ele atualmente recusa
-   alterações no ASAR fora do plano existente. Não afrouxar essa política para
-   instalar o protótipo. Uma integração precisa validar a mudança por membro,
-   os hashes selados, a origem estável e o conjunto completo de ferramentas,
-   com testes de adulteração, interrupção e atualização. Os scripts de pesquisa
-   usam Python; não adicionam uma dependência ao uso diário ou ao instalador atual.
+2. ~~Integrar verificações ao construtor de produção~~ **feito em 17/10/2026.**
+   Ver [integração no construtor](#integração-no-construtor-de-produção).
 3. **Repetir abertura, fechamento e reconstrução**, incluindo outra arquitetura
    quando houver a origem correspondente. Os ensaios reais desta rodada são arm64.
    Assinaturas ad-hoc podem provocar novas solicitações após reconstruções.

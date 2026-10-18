@@ -301,7 +301,7 @@ ci_compile_integrity() {
 }
 ci_integrity_binding() {
     local idx="$1" result policy=MCD_BUILD_CONFIG_1
-    [ "$CI_MODE" != original-copy ] || policy=MCD_BUILD_CONFIG_ORIGINAL_COPY_1
+    [ "$CI_MODE" != original-copy ] || policy=MCD_BUILD_CONFIG_ORIGINAL_COPY_2
     result="$(
         {
             [ "$CI_APP_SCOPE" != user ] || printf '%s\0' MCD_USER_APPLICATIONS_1 "$CI_APPS"
