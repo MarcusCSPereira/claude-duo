@@ -11,6 +11,10 @@ The [current execution roadmap in Portuguese](docs/ROADMAP_PT_BR.md) lists the
 remaining work, release criteria and the steps that need account login. The
 hardened branch is still experimental; graphical two-account Code behavior has
 not been validated.
+**The first live Duo launch is blocked:** it requested access to the existing
+`Claude Safe Storage` Keychain entry; the user denied access before signing in.
+See the [finding and resumption criteria](docs/KEYCHAIN_FIRST_LAUNCH_PT_BR.md).
+The current candidate is not approved for daily two-account use.
 The preferred deployment is now **the official Claude app plus one managed
 copy**, each using a different account and Desktop/Code data pair. The original
 keeps its official updater; automatic detection and rebuilding of the copy are
@@ -27,9 +31,9 @@ The [configuration reuse proposal](docs/PROFILE_REUSE_PT_BR.md) covers importing
 preferences, MCP definitions and plugin selections while keeping authentication
 separate; the importer is not implemented yet.
 
-Run as many Claude Desktop instances as you like — personal, work, a client account, a
-scratch profile — side by side, each with its own account, its own profile, and its own
-coloured Dock icon.
+The intended workflow is side-by-side Claude Desktop instances with distinct
+accounts, profile directories and Dock icons. Separate directories are implemented;
+independent authentication still requires the blocked GUI validation above.
 
 Claude Desktop accepts Electron's `--user-data-dir`, so isolating a second profile is
 easy. Giving each instance its own **Dock icon** is not: a thin wrapper `.app` can't do
@@ -182,8 +186,8 @@ unless you set it per instance. See [Per-instance environment](#per-instance-env
 
 | | Isolated per instance | Shared |
 |---|---|---|
-| Account, conversations, settings, MCP config | ✅ | |
-| Keychain / login | Requires GUI/SSO validation; changing bundle IDs can affect access | Same OS user's Keychain remains outside profile-directory isolation |
+| Desktop profile files: conversations, settings, MCP config | Separate requested `userData` paths | Effective account independence remains unverified |
+| Keychain / login | Unverified; first live Duo launch requested the existing `Claude Safe Storage` entry and was denied | Bundle name remains `Claude`; fresh directories and a distinct bundle ID did not prevent that request |
 | Cowork files, scratch workspaces | ✅ | |
 | Claude Code hooks + agent-mode sessions | ✅ *once `CLAUDE_CONFIG_DIR` is set* | ⚠️ otherwise |
 | SSH keys, git config, the rest of your home dir | | ⚠️ always |
@@ -216,7 +220,8 @@ Screen Recording, plus a full first-run setup against an empty profile.
 ### What happens
 
 Each instance is a **point-in-time copy** of `Claude.app`, made with APFS cloning, and
-fully independent once made. When `Claude.app` updates itself, the copies **do not
+independent at the bundle-file level once made. This does not establish credential
+independence. When `Claude.app` updates itself, the copies **do not
 change** — they keep running the old version, silently and indefinitely.
 
 Worse: `Claude.app` only updates itself **when it runs**. If you only ever launch the
@@ -538,7 +543,7 @@ For each instance, `claude-apps-refresh.sh`:
 |---|---|
 | `cp -Rc` (clone) | ~2 MB instead of 823 MB per instance |
 | Re-sign **only** main binary + outer bundle | The binary's signature seals `Info.plist`, which we edit, so it must be re-signed. Re-signing the 381 MB Electron Framework rewrites it and destroys the clone. Mixed signatures load fine because we sign **without** hardened runtime, so library validation (which demands matching Team IDs) is off |
-| `CFBundleName` stays `"Claude"` | Electron derives the helper-app name from it. Anything else fails at launch with `FATAL: Unable to find helper app`. `CFBundleDisplayName` is what the Dock shows |
+| `CFBundleName` stays `"Claude"` | Electron uses it to locate the existing helper apps. It also influences the macOS Safe Storage service name: the first live Duo launch requested the existing `Claude Safe Storage` entry. Changing this field alone is not a validated fix. See the [blocked GUI finding](docs/KEYCHAIN_FIRST_LAUNCH_PT_BR.md) |
 | Delete `CFBundleIconName` | Points into `Assets.car` (Claude's own icon) and **outranks** `CFBundleIconFile`. Leave it and the orange icon comes back |
 | Delete `CFBundleURLTypes` | Stops copies fighting over `claude://` and `msauth://` links |
 | `arch -arm64` in the launcher | **Critical** — see below |

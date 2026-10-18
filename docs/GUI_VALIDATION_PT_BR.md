@@ -5,6 +5,13 @@ O código de manutenção foi testado com dados inventados. **Login, contas
 simultâneas e Code na cópia continuam sem validação gráfica.** Uma assinatura
 local válida ou um ícone diferente não comprova independência das contas.
 
+**Estado em 17/10/2026:** a preparação real foi concluída e o usuário abriu o
+Duo. O app solicitou acesso à entrada preexistente `Claude Safe Storage`; o
+usuário negou. G01/G11 ficaram inconclusivos e o login está pausado. Ver o
+[relato do bloqueio e critérios de retomada](KEYCHAIN_FIRST_LAUNCH_PT_BR.md) e
+o [registro sanitizado](evidence/gui-first-launch.json). Os demais casos ainda
+não foram executados.
+
 A seleção de destino privado passou por oito novos testes, dentro da suíte de
 145 casos, e por oito checagens de construção/assinatura/conteúdo com a origem
 real, em pasta descartável. Nos últimos, processos foram simulados e não houve
@@ -21,7 +28,9 @@ O teste gráfico do original envolverá seu perfil real. Pastas novas do Duo
 reduzem mistura de dados, mas não isolam o Chaveiro, todos os locais globais de
 configuração ou arquivos acessíveis ao mesmo UID. Independência de autenticação
 continua sendo algo a demonstrar. Não trocar HOME nem copiar credenciais para
-simular separação de contas. A preparação descrita abaixo ainda não foi executada.
+simular separação de contas. A preparação abaixo foi executada com uma
+configuração nova; não converteu os perfis legados. Personal e Trabalho foram
+movidos para a Lixeira a pedido do usuário, preservando seus dados.
 
 ## Preparação e participação do usuário
 
@@ -114,7 +123,8 @@ Fluxo declarado pelo usuário: **login por link de e-mail, sem SSO**. G07 é
 obrigatório para esse link; SSO fica fora do escopo inicial e não será tratado
 como testado.
 
-Todos os itens começam como **NÃO EXECUTADO**. Usar somente os rótulos A e B
+Na abertura da matriz, todos os itens começam como **NÃO EXECUTADO**; os
+resultados efetivos ficam no registro datado acima. Usar somente os rótulos A e B
 no relatório público; confirmar e-mail/organização privadamente na interface.
 Declarar os recursos necessários. Nova autenticação é feita pelo usuário dentro
 do Claude/navegador. Saída da conta A, reinício e encerramento da sessão macOS
@@ -135,6 +145,11 @@ ambiente. Registrar a cobertura obtida sem usar o perfil real como descartável.
 | G09 | Construção e checkpoint com original, Duo ou ambos abertos | Recusa segura, sem encerrar tarefas para forçar manutenção |
 | G10 | Preferências e extensões inventadas | Reaproveitamento sem transferir autenticação, conforme proposta abaixo |
 | G11 | Permissões e recursos declarados | Funcionamento por identidade; falhas registradas |
+
+Antes de G01, observar pedidos de acesso ao Chaveiro. Um pedido inesperado à
+entrada do original bloqueia o login até revisão. Negar o pedido; não apagar
+entradas nem liberar acesso para forçar o teste. O candidato atual encontrou
+esse bloqueio. Pasta, identificador ou ícone distintos não o resolvem por si.
 
 Criar marcadores inofensivos distintos nos projetos e nas instruções de teste.
 Uma resposta contendo um marcador demonstra configuração carregada, não prova

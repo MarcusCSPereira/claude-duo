@@ -1,5 +1,12 @@
 # Local hardening changes
 
+**Live GUI validation is blocked:** the first Duo launch requested access to the
+existing `Claude Safe Storage` Keychain entry. The user denied it; no
+account was connected. Separate data directories and bundle IDs have not
+established credential independence. See the
+[first-launch finding](docs/KEYCHAIN_FIRST_LAUNCH_PT_BR.md). Do not approve
+daily two-account use from the maintenance tests alone.
+
 This revision supports the existing graphical workflow: open the Personal or
 Enterprise/Trabalho application and use its Code tab. It does not require the
 person using Claude to interact with the Claude Code CLI.

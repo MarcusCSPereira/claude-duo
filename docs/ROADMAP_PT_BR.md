@@ -4,8 +4,10 @@ Plano atualizado em 17/10/2026, no
 [PR #1 do seu fork](https://github.com/guibrbs/multi-claude-desktop/pull/1), ainda
 em rascunho. A base anterior `2d37bf6` possui as evidências históricas citadas
 abaixo. O instalador e a política de perfis agora têm testes adicionais; a
-instalação em uso continua intacta. O documento distingue as entregas em
-pastas descartáveis das etapas futuras com aplicativos e contas reais.
+preparação real foi concluída. O primeiro Duo aberto pelo usuário pediu acesso
+à entrada preexistente `Claude Safe Storage`, e o usuário negou. O ensaio de
+contas está bloqueado: [achado KC01](KEYCHAIN_FIRST_LAUNCH_PT_BR.md). O documento
+distingue testes descartáveis, preparação real e validação de contas pendente.
 
 ## Resultado que queremos
 
@@ -22,7 +24,8 @@ próprios. Cada cópia troca a assinatura externa por uma assinatura local;
 a identidade e as permissões exclusivas da Anthropic permanecem uma limitação
 nessa cópia. A separação completa de autenticação entre original e cópia ainda
 precisa ser demonstrada na interface. Esta preferência substitui o desenho de
-duas cópias para o uso diário; a instalação existente permanece inalterada.
+duas cópias para o uso diário. Personal e Trabalho foram movidos para a Lixeira
+a pedido do usuário; seus dados e a configuração legada foram preservados.
 
 ## Topologia preferida e atualização da cópia
 
@@ -94,13 +97,13 @@ as pastas das duas contas.
 | Cópia de segurança dos perfis | Checkpoint opcional do par Desktop/Code com verificação de conteúdo | Sem restauração; formato restrito; exclui Chaveiro e projetos externos; conteúdo não criptografado |
 | Instalador e modo original + Duo | Conjunto completo verificado, versões retidas, ativação atômica do conjunto e operação em andamento vinculada à sua versão | Integração com instalação legada e interface de manutenção pendentes |
 | Testes automatizados atuais | 145 testes aprovados localmente; resultados remotos desta etapa registrados no PR | Testes com dados inventados não comprovam login, SSO ou uso real do Code |
-| Duas contas no Code gráfico | Roteiro preparado; ensaio com contas reais não executado | Conta efetiva, retorno do link de e-mail e continuidade ainda precisam ser observados |
+| Duas contas no Code gráfico | Primeiro Duo abriu na tela de entrada; login pausado pelo achado KC01 no Chaveiro | Conta efetiva, retorno do link de e-mail e continuidade ainda precisam ser observados |
 | Reaproveitamento de preferências, MCPs e plugins | Proposta de importação seletiva documentada | Inventário, prévia, aplicação e sincronização ainda não implementados |
 | Reconstrução automática do Duo | Fluxo planejado; construtor manual e watchdog de verificação disponíveis | Detecção, espera e reconstrução automática após atualização oficial ainda não implementadas |
 | Base anterior de CI | 106 testes aprovados em Apple Silicon e Intel no commit `2d37bf6` | Evidência histórica, anterior ao instalador |
 | Claude Duo em pasta descartável | 8 checagens reais aprovadas, agora também no destino privado: origem oficial, construção, conteúdo/assinatura e reserva do perfil padrão | Observação de processos simulada; aplicativo não aberto; contas não usadas |
 | Aplicativo real na base anterior | 10 verificações aprovadas com Claude 2.42304.0, incluindo detecção de alteração após nova assinatura local | O executável do Claude não foi aberto e nenhuma conta foi usada nesses testes |
-| Instalação na sua máquina | Instalação legada preservada | As novas proteções ainda não foram instaladas nos aplicativos em uso |
+| Instalação na sua máquina | Conjunto versionado instalado; Duo construído e verificado em destino privado com observação nativa real | Personal/Trabalho na Lixeira por solicitação; dados legados preservados; candidato sem liberação para contas reais |
 
 Referências: [CI da base conferida](https://github.com/guibrbs/multi-claude-desktop/actions/runs/39061863713),
 [evidências](evidence/integrity-maintenance.json) e
@@ -109,8 +112,10 @@ As evidências da base do instalador estão em
 [toolset-installation.json](evidence/toolset-installation.json). A etapa de
 preparação do laboratório, com os 145 testes e hashes atuais, está em
 [gui-preparation.json](evidence/gui-preparation.json). O destino privado foi
-ensaiado em pastas descartáveis. O registro histórico precede a decisão de usar
-somente a sessão habitual; nenhum ensaio gráfico ou migração foi realizado.
+ensaiado em pastas descartáveis. Esse registro histórico precede a decisão de
+usar somente a sessão habitual. A preparação real e o bloqueio da primeira
+abertura constam em [gui-first-launch.json](evidence/gui-first-launch.json);
+nenhum login ou migração de perfis foi realizado.
 
 ## Ordem de execução
 
