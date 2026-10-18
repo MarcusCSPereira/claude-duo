@@ -36,7 +36,7 @@ jobs:
           python3 --version
       - name: Check Bash syntax
         run: |
-          for script in bin/*.sh; do
+          for script in bin/*.sh duo/*.sh; do
             /bin/bash -n "$script" || exit 1
           done
       - name: Check launch-agent plist
