@@ -247,7 +247,10 @@ static void sync_fd(int fd) { int rc; do { rc = fsync(fd); } while (rc && errno 
 
 // Package product name: same-size package.json rewrite inside app.asar.
 // Electron derives app.name, and so its "<name> Safe Storage" Keychain item,
-// from package.json productName. Offsets never move: only package.json bytes
+// from package.json productName. "<instance> Claude" keeps the user agent
+// token (spaces removed: "<instance>Claude/<version>") recognizable as the
+// desktop client by claude.ai, which looks for "claude/"; "Claude <instance>"
+// would yield "Claude<instance>/" and the web UI would treat it as a browser. Offsets never move: only package.json bytes
 // and its integrity digests in the (equal-length) header change.
 struct asar { unsigned char *bytes; size_t length, raw, payload, package, size, block, hash, blocks, block_at[64]; };
 static unsigned char *read_whole(int parent, const char *path, size_t limit, size_t *length, mode_t *mode) {
@@ -358,7 +361,7 @@ static size_t minify(const unsigned char *p, size_t length, unsigned char *out) 
     return used;
 }
 static unsigned char *rename_product(const unsigned char *old, size_t length, const char *name) {
-    char value[96]; int wanted = snprintf(value, sizeof(value), "\"Claude %s\"", name);
+    char value[96]; int wanted = snprintf(value, sizeof(value), "\"%s Claude\"", name);
     if (wanted < 0 || (size_t)wanted >= sizeof(value)) fail("product name too long");
     for (const char *c = name; *c; c++) if (!((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '-')) fail("product name must be a validated instance name");
     size_t value_at = 0, found = 0, raw_count = 0, delta = (size_t)wanted - 8; int depth = 0;

@@ -37,8 +37,9 @@ person using Claude to interact with the Claude Code CLI.
   publication. Local re-signing cannot hide drift while the private record is
   trusted. See [APP_INTEGRITY.md](docs/APP_INTEGRITY.md).
 - In `original-copy` mode, give the copy its own `package.json` `productName`
-  (`Claude <name>`), so Electron uses a separate `<productName> Safe Storage`
-  Keychain item. The rewrite keeps the archive the same size and reseals
+  (`<name> Claude`), so Electron uses a separate `<productName> Safe Storage`
+  Keychain item while the user-agent token (`<name>Claude/<version>`) is still
+  recognized as the desktop client by claude.ai. The rewrite keeps the archive the same size and reseals
   only that member's digests and the header hash. The integrity record
   regenerates the expected archive from the source and requires byte
   equality. See [the namespace notes](docs/KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md).

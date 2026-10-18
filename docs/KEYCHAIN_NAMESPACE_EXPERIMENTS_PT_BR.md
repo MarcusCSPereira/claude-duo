@@ -103,13 +103,13 @@ O login real continua não testado.
 ## Integração no construtor de produção
 
 No modo `original-copy` (o Duo), o construtor agora dá à cópia o
-`productName` `Claude <nome>`, por exemplo `Claude Duo`. Com isso, o Electron
-procura a chave `Claude Duo Safe Storage`. O modo legado não muda: instalações
+`productName` `<nome> Claude`, por exemplo `Duo Claude`. Com isso, o Electron
+procura a chave `Duo Claude Safe Storage`. O modo legado não muda: instalações
 antigas continuam com a mesma chave e não são deslogadas.
 
 Como funciona, em C, sem Python no uso diário:
 
-- **Mesmo tamanho.** No `package.json`, `"Claude"` vira `"Claude Duo"`, e o
+- **Mesmo tamanho.** No `package.json`, `"Claude"` vira `"Duo Claude"`, e o
   mesmo número de bytes de espaço insignificante, fora de strings, é removido.
   O arquivo mantém o tamanho, nenhum offset do ASAR se move e o cabeçalho
   mantém o comprimento. Mudam só os hashes desse membro (hash e blocos) e, no
@@ -129,7 +129,7 @@ Como funciona, em C, sem Python no uso diário:
   `ElectronAsarIntegrity` da origem que não confere com o cabeçalho. Uma
   verificação semântica independente compara as formas sem espaço.
 - **Duo já instalado.** A política de vínculo passou para
-  `MCD_BUILD_CONFIG_ORIGINAL_COPY_2`. O Duo construído antes (`b938c7d`) falha
+  `MCD_BUILD_CONFIG_ORIGINAL_COPY_3`. Qualquer Duo construído antes falha
   na verificação e precisa ser reconstruído para receber a correção.
 
 Validação:
@@ -152,6 +152,31 @@ Validação:
 
 O Duo instalado em `~/Applications` **não foi reconstruído**. Isso é uma
 mudança no seu sistema e fica para a sua decisão.
+
+## Interface web depois do login (correção de 17/10/2026)
+
+A [reabertura](#reabertura-e-comparação-por-logs) comparou só a tela
+**deslogada**, e a conclusão de que o nome não afetava a experiência Desktop
+estava errada. Logado com `Claude Duo`, o app mostrou avisos da versão web
+("Experimente o Claude Code no desktop", "Código no seu celular") e os botões
+da janela sobre o título.
+
+Causa, conferida no código:
+
+- O Electron 44.7.2 monta o User-Agent com o nome do app **sem espaços**
+  (`BuildApplicationUserAgent`, `RemoveChars(name, " ")`) e nomeia a chave como
+  `<nome> Safe Storage`, com espaços. Ele também apara o `productName` (`trim`).
+- O claude.ai ativa a interface Desktop com `claudeAppBindings` **e** um token
+  `claude/` no User-Agent (`/claude(nest|gov)?\/([^ ]+)/i`,
+  `indexOf("claude/")`). `Claude Duo` gerava `ClaudeDuo/2.42304.0`, que falha.
+
+Correção: o `productName` passou a ser `<nome> Claude` (`Duo Claude`), com
+token `DuoClaude/2.42304.0`, aceito por essas checagens, e chave
+`Duo Claude Safe Storage`. Uma checagem `includes(" Claude/")` do claude.ai,
+usada em mobile e em um caminho de impressão, continua diferente do original.
+Paridade total exigiria um nome que, sem espaços, fosse exatamente `Claude`,
+ou seja, com espaço no meio (por exemplo `Claud e`). Essa opção foi descartada
+pela legibilidade. A confirmação final é a interface logada sem os avisos web.
 
 ## O que falta antes de integrar
 

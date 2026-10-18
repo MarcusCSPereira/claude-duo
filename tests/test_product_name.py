@@ -73,8 +73,8 @@ class ProductNameTests(unittest.TestCase):
         self.assertEqual(len(after), len(before))
         self.assertEqual(self.archive.read_bytes(), before)  # Source untouched.
         header, package, header_hash = unpack(after)
-        self.assertEqual(json.loads(package)["productName"], "Claude One")
-        self.assertEqual(json.loads(package), {**json.loads(unpack(before)[1]), "productName": "Claude One"})
+        self.assertEqual(json.loads(package)["productName"], "One Claude")
+        self.assertEqual(json.loads(package), {**json.loads(unpack(before)[1]), "productName": "One Claude"})
         integrity = header["files"]["package.json"]["integrity"]
         self.assertEqual(integrity["hash"], hardening.sha256(package))
         self.assertEqual(integrity["blocks"], [hardening.sha256(package)])
@@ -83,6 +83,21 @@ class ProductNameTests(unittest.TestCase):
         self.assertEqual(old_header["files"]["index.js"], header["files"]["index.js"])
         self.assertEqual(old_header["files"]["node_modules"], header["files"]["node_modules"])
         self.assertFalse((self.fixture.app / "Contents/Resources/.app.asar.mcd-new").exists())
+
+    def test_product_name_keeps_a_desktop_user_agent_token(self):
+        # Electron 44 builds "<app.name without spaces>/<version>" into the user
+        # agent and names the Keychain item "<app.name> Safe Storage". claude.ai
+        # enables its desktop UI only for /claude(nest|gov)?\/([^ ]+)/i and
+        # indexOf("claude/"); "Claude One" -> "ClaudeOne/" fails both.
+        import re
+        self.fixture.build()
+        name = json.loads(unpack(self.app_archive().read_bytes())[1])["productName"]
+        token = name.replace(" ", "") + "/1.0.0"
+        agent = "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) " + token + " Chrome/1 Electron/44.7.2 Safari/537.36"
+        self.assertRegex(agent, re.compile(r"claude(nest|gov)?\/([^ ]+)", re.I))
+        self.assertIn("claude/", agent.lower())
+        self.assertNotEqual(name + " Safe Storage", "Claude Safe Storage")
+        self.assertEqual(name.strip(), name)  # Electron trims productName.
 
     def test_legacy_copies_keep_the_archive_byte_identical(self):
         self.fixture.write_config()
@@ -95,7 +110,7 @@ class ProductNameTests(unittest.TestCase):
         original = self.app_archive().read_bytes()
         javascript = original.index(b"synthetic vendor code")
         for label, tampered in [("javascript", original[:javascript] + b"S" + original[javascript + 1:]),
-                                ("product", original.replace(b'"Claude One"', b'"Claude Two"'))]:
+                                ("product", original.replace(b'"One Claude"', b'"Two Claude"'))]:
             with self.subTest(label=label):
                 self.app_archive().write_bytes(tampered)
                 rejected = self.fixture.run_script("--verify")
@@ -232,7 +247,7 @@ exec /usr/libexec/PlistBuddy "$@"
         self.assertEqual(self.fixture.run_script("--verify").returncode, 0)
         rebuilt = self.app_archive().read_bytes()
         self.assertIn(b"updated vendor code", rebuilt)
-        self.assertEqual(json.loads(unpack(rebuilt)[1])["productName"], "Claude One")
+        self.assertEqual(json.loads(unpack(rebuilt)[1])["productName"], "One Claude")
 
 
 if __name__ == "__main__":
