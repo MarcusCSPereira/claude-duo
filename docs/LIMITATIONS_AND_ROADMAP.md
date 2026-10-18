@@ -92,8 +92,9 @@ and cannot be accepted as a published checkpoint. See
 
 This is a prerequisite for reviewed migration/restore, not completion of that
 roadmap item. There is no restore, schema compatibility proof, Keychain/project
-backup or point-in-time snapshot. Links, ACLs, extended attributes and other
-unsupported metadata cause refusal rather than silent omission. Real accounts
+backup or point-in-time snapshot. Links, ACLs, extended attributes (other than
+the OS-managed `com.apple.provenance`, which is not copied) and other unsupported
+metadata cause refusal rather than silent omission. Real accounts
 and installed apps/profiles remain untouched.
 
 The current suite passes **85 offline tests**: the earlier 60 plus 18 native

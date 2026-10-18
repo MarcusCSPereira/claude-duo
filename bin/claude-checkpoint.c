@@ -63,6 +63,23 @@ static bool same(struct stat a, struct stat b) {
         a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec &&
         a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec;
 }
+// macOS adds com.apple.provenance to files created by many app-launched
+// processes; it records the creator for Gatekeeper and is not file content.
+// It is the only attribute tolerated (and not copied); any other one fails.
+static bool only_provenance_attribute(int fd) {
+    ssize_t length = flistxattr(fd, NULL, 0, 0);
+    if (length < 0) return false;
+    if (length == 0) return true;
+    if (length > 64 * 1024) return false;
+    char buffer[64 * 1024 + 1];
+    if (flistxattr(fd, buffer, (size_t)length, 0) != length) return false;
+    for (size_t offset = 0; offset < (size_t)length;) {
+        size_t size = strnlen(buffer + offset, (size_t)length - offset);
+        if (!size || size == (size_t)length - offset || strcmp(buffer + offset, "com.apple.provenance")) return false;
+        offset += size + 1;
+    }
+    return true;
+}
 static void no_metadata(int fd) {
     acl_t acl = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
     if (acl) {
@@ -72,9 +89,7 @@ static void no_metadata(int fd) {
         acl_free(acl);
         if (result != -1 || saved_errno != EINVAL) fail("ACL entries are unsupported in content checkpoints");
     } else if (errno != ENOENT) syserr("cannot inspect ACL");
-    ssize_t count = flistxattr(fd, NULL, 0, 0);
-    if (count < 0) syserr("cannot inspect extended attributes");
-    if (count) fail("extended attributes are unsupported; nothing is silently omitted");
+    if (!only_provenance_attribute(fd)) fail("extended attributes are unsupported; nothing is silently omitted");
 }
 static void check_node(int fd, struct stat value, dev_t device, bool private) {
     if (value.st_uid != getuid() || (value.st_mode & 07022) || value.st_flags || value.st_dev != device)

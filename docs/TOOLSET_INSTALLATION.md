@@ -64,7 +64,8 @@ argument. Only a test compilation permits a synthetic home override.
 Owned home ancestors must be physical, without group/other write permission or
 custom allow ACLs. The tool root/release/operation directories are 0700. Records
 and data sources are 0600; executable scripts and dispatcher are 0700. Files
-must be regular, owned, single-link and free of extended attributes/flags;
+must be regular, owned, single-link and free of flags and of extended attributes
+other than the OS-managed `com.apple.provenance` (creator metadata, not content);
 symlinks, special files, custom allow ACLs and volume crossings are refused.
 Standard deny ACLs are allowed. These strict restrictions may reject a package
 or location; the installer does not strip source security metadata to proceed.

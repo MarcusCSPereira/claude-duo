@@ -241,6 +241,31 @@ class CheckpointTests(unittest.TestCase):
         subprocess.run(["/bin/chmod", "-N", str(file)], check=True)
         self.assertFalse(self.published.exists())
 
+    def test_only_the_os_provenance_attribute_is_tolerated(self):
+        # macOS stamps com.apple.provenance on files created by app-launched
+        # processes; it is creator metadata, not content, and is not copied.
+        file = self.code / "settings"
+        for target in (file, self.code):
+            subprocess.run(["/usr/bin/xattr", "-wx", "com.apple.provenance", "01020000000000000000", str(target)], check=True)
+        self.prepare()
+        self.commit()
+        self.assertEqual(self.run_helper("verify").returncode, 0)
+        self.assertEqual((self.published / "code/settings").read_bytes(), file.read_bytes())
+
+    def test_quarantine_and_other_attributes_still_fail_beside_provenance(self):
+        file = self.code / "settings"
+        subprocess.run(["/usr/bin/xattr", "-wx", "com.apple.provenance", "01020000000000000000", str(file)], check=True)
+        for name in ("com.apple.quarantine", "com.apple.provenance.extra", "com.example.checkpoint"):
+            with self.subTest(name=name):
+                subprocess.run(["/usr/bin/xattr", "-w", name, "synthetic", str(file)], check=True)
+                result = self.run_helper("prepare")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("extended attributes are unsupported", result.stderr)
+                subprocess.run(["/usr/bin/xattr", "-d", name, str(file)], check=True)
+                if self.pending.exists():
+                    self.pending.rmdir()
+        self.assertFalse(self.published.exists())
+
     def test_unsafe_modes_paths_and_linked_manifest_are_refused(self):
         (self.code / "settings").chmod(0o666)
         self.assertNotEqual(self.run_helper("prepare").returncode, 0)

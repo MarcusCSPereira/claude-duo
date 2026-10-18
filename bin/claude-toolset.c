@@ -78,6 +78,23 @@ static void acl_check(int fd) {
     int saved = errno; acl_free(acl);
     if (rc != -1 || saved != EINVAL) fail("unknown ACL enumeration result");
 }
+// macOS adds com.apple.provenance to files created by many app-launched
+// processes; it records the creator for Gatekeeper and is not file content.
+// It is the only attribute tolerated (and not copied); any other one fails.
+static bool only_provenance_attribute(int fd) {
+    ssize_t length = flistxattr(fd, NULL, 0, 0);
+    if (length < 0) return false;
+    if (length == 0) return true;
+    if (length > 64 * 1024) return false;
+    char buffer[64 * 1024 + 1];
+    if (flistxattr(fd, buffer, (size_t)length, 0) != length) return false;
+    for (size_t offset = 0; offset < (size_t)length;) {
+        size_t size = strnlen(buffer + offset, (size_t)length - offset);
+        if (!size || size == (size_t)length - offset || strcmp(buffer + offset, "com.apple.provenance")) return false;
+        offset += size + 1;
+    }
+    return true;
+}
 static void check(int fd, bool directory, bool private, mode_t mode, dev_t device) {
     struct stat s = info(fd);
     if ((directory ? !S_ISDIR(s.st_mode) : !S_ISREG(s.st_mode)) || s.st_uid != getuid() ||
@@ -85,7 +102,7 @@ static void check(int fd, bool directory, bool private, mode_t mode, dev_t devic
         (device && device != s.st_dev) || (private && (s.st_mode & 07777) != mode))
         fail("unsafe type, owner, permissions, links, flags or volume");
     acl_check(fd);
-    if (!directory && flistxattr(fd, NULL, 0, 0) != 0) fail("file attributes are unsupported");
+    if (!directory && !only_provenance_attribute(fd)) fail("file attributes are unsupported");
 }
 static int open_dir(int parent, const char *name, bool private, bool create, dev_t device) {
     if (create && mkdirat(parent, name, 0700) && errno != EEXIST) syserr("cannot create private directory");

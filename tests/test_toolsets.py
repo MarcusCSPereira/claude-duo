@@ -179,6 +179,21 @@ class ToolsetTests(unittest.TestCase):
         file.chmod(0o666)
         self.assertNotEqual(self.call("package-check", package, digest).returncode, 0)
 
+    def test_package_provenance_is_tolerated_but_other_attributes_are_refused(self):
+        package, digest = self.package()
+        file = package / "bin/claude-maintenance.h"
+        subprocess.run(["/usr/bin/xattr", "-wx", "com.apple.provenance", "01020000000000000000", str(file)], check=True)
+        self.assertEqual(self.call("package-check", package, digest).returncode, 0)
+        for name in ("com.apple.quarantine", "com.example.toolset"):
+            with self.subTest(name=name):
+                subprocess.run(["/usr/bin/xattr", "-w", name, "synthetic", str(file)], check=True)
+                refused = self.call("package-check", package, digest)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("file attributes are unsupported", refused.stderr)
+                subprocess.run(["/usr/bin/xattr", "-d", name, str(file)], check=True)
+        self.install()
+        self.assertEqual(self.call("verify").returncode, 0)
+
     def test_installed_content_and_manifest_drift_are_detected_before_dispatch(self):
         _, digest = self.install()
         release = self.root / "releases" / digest

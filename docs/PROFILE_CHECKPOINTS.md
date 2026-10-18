@@ -86,7 +86,10 @@ also requires inspection; failure alone does not prove publication did not occur
 
 Only user-owned regular files/directories, without group/other write access,
 set-ID/sticky bits, file flags, cross-device entries, hardlinked files, symlinks,
-special files, ACL entries or extended attributes are accepted. The helper does
+special files, ACL entries or extended attributes are accepted. The one exception
+is `com.apple.provenance`, which macOS adds to files created by many app-launched
+processes; it records the creator, is not file content and is not copied. Any
+other attribute, including `com.apple.quarantine`, still fails. The helper does
 not skip offending files, dereference links, strip metadata from the source or
 silently return an incomplete backup. This stricter checkpoint policy also
 rejects deny ACL entries that the normal launcher can allow. Real Code/Cowork
