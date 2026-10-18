@@ -8,7 +8,7 @@ import unittest
 
 TESTS = Path(__file__).resolve().parents[1] / "tests"
 GROUPS = {
-    "profiles": ("test_hardening",),
+    "profiles": ("test_hardening", "test_namespace_probe", "test_asar_product_name"),
     "storage": ("test_checkpoints", "test_integrity", "test_maintenance", "test_transactions"),
     "toolsets": ("test_toolsets",),
 }

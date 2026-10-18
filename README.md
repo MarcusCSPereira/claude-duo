@@ -15,6 +15,11 @@ not been validated.
 `Claude Safe Storage` Keychain entry; the user denied access before signing in.
 See the [finding and resumption criteria](docs/KEYCHAIN_FIRST_LAUNCH_PT_BR.md).
 The current candidate is not approved for daily two-account use.
+Two [namespace experiments](docs/KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md) now
+distinguish a failed bundle/helper rename from a product-name prototype that
+opened without permission prompts and had a distinct named Keychain item.
+The latter still needs Desktop-flow validation and production integration;
+the installed Duo has not been replaced.
 The preferred deployment is now **the official Claude app plus one managed
 copy**, each using a different account and Desktop/Code data pair. The original
 keeps its official updater; automatic detection and rebuilding of the copy are

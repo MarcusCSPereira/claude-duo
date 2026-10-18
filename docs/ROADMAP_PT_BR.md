@@ -8,6 +8,9 @@ preparação real foi concluída. O primeiro Duo aberto pelo usuário pediu aces
 à entrada preexistente `Claude Safe Storage`, e o usuário negou. O ensaio de
 contas está bloqueado: [achado KC01](KEYCHAIN_FIRST_LAUNCH_PT_BR.md). O documento
 distingue testes descartáveis, preparação real e validação de contas pendente.
+Os [experimentos posteriores](KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md) encontraram
+um caminho para uma entrada com nome próprio, mas a página de login mudou e a
+integração de produção continua pendente. O bloqueio de liberação permanece.
 
 ## Resultado que queremos
 

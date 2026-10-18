@@ -11,6 +11,14 @@ não demonstra roubo de dados, nem comprova mistura de contas. Demonstra uma
 dependência de uma entrada existente que a separação de pastas não resolveu.
 Não há resultado aprovado de independência de autenticação.
 
+**Atualização da investigação:** o
+[experimento de nome interno e auxiliares](KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md)
+não resolveu o aviso. Uma segunda amostra, mudando o nome do produto no pacote,
+abriu sem pedidos de permissão e gerou uma entrada com nome próprio, confirmada
+somente por atributos. A experiência Desktop e as contas continuam pendentes;
+o protótipo não substituiu o Duo instalado. A hipótese baseada só em
+`CFBundleName` era incompleta.
+
 ## O que foi observado
 
 - Candidato construído com a implementação `b938c7dcd90d755aa1457c0118bb7884440a082c`,
