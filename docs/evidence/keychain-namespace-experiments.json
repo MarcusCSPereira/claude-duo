@@ -44,7 +44,7 @@
       "vendor_helpers_original_signatures_preserved": true,
       "runtime_result": "opened_without_permission_prompts",
       "user_confirmed_no_permission_prompts": true,
-      "observed_ui": "web sign-in page rather than previous Desktop introduction",
+      "observed_ui": "Desktop signed-out sign-in screen (claude.ai/login in the app window), same state recorded for the previous Duo",
       "own_keychain_service_attributes": {
         "service": "Claude Duo Probe bc54a4da Safe Storage",
         "status": 0,
@@ -58,6 +58,19 @@
         "prepare-product-name-probe.py": "aa43498e4b6c4a597e36c59d5ec5b803aac755ed18dccfd648d199191a5835b6",
         "asar_product_name.py": "c149c394cbccd3805a1279ff3f0f9ce9aaf7de2221985f79032da05de76a5990",
         "prepare-namespace-probe.py": "123a0394c9e33f9c51adc73f58a41dc1f0117bd9ff48114c243c911a1f9dcdb9"
+      },
+      "observed_ui_correction": {
+        "date": "2026-10-17",
+        "earlier_claim": "web sign-in page rather than previous Desktop introduction",
+        "status": "not_confirmed"
+      },
+      "relaunch_by_agent": {
+        "time_local": "2026-10-17T22:07",
+        "sign_in_cookie_present": false,
+        "permission_prompts": "none",
+        "safe_storage_warning": false,
+        "cookie_banner_answered": false,
+        "clean_quit": true
       }
     }
   ],
@@ -101,5 +114,21 @@
   ],
   "secrets_collected": false,
   "keychain_access_granted_by_agent": false,
-  "keychain_entries_deleted": false
+  "keychain_entries_deleted": false,
+  "startup_log_comparison": {
+    "previous_duo_b938c7d": {
+      "main_process_stall_ms": 88692,
+      "safe_storage_available": false
+    },
+    "helper_rename_probe": {
+      "main_process_stall_ms": 40968,
+      "safe_storage_available": false
+    },
+    "product_name_probe": {
+      "main_process_stall_ms": null,
+      "safe_storage_warning": false,
+      "launches": 2
+    },
+    "source": "local main.log, signed-out launches only; no secrets read"
+  }
 }

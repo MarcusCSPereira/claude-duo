@@ -10,7 +10,7 @@ continua: os experimentos não aprovam duas contas reais nem o Code gráfico.
 | Experimento | Mudanças | Resultado |
 |---|---|---|
 | Nome interno e auxiliares | `CFBundleName` próprio, quatro auxiliares renomeados e reassinados | Abriu, mas ainda pediu `Claude Safe Storage`; usuário negou. Hipótese insuficiente. Também houve pedido de Documentos. |
-| Nome de produto do pacote | `package.json.productName` próprio no ASAR; auxiliares originais preservados | Abriu sem pedidos de permissão, conforme interface e confirmação do usuário. Consulta apenas de atributos encontrou uma entrada com o nome próprio esperado. A página de login exibida era a da web, diferente da introdução anterior do Desktop. |
+| Nome de produto do pacote | `package.json.productName` próprio no ASAR; auxiliares originais preservados | Abriu sem pedidos de permissão, conforme interface e confirmação do usuário. Consulta apenas de atributos encontrou uma entrada com o nome próprio esperado. A tela exibida foi o login deslogado do Desktop (claude.ai/login na janela do app), o mesmo estado do Duo antigo; ver reabertura abaixo. |
 
 Os dois protótipos foram fechados com ⌘Q. O observador nativo confirmou os apps
 Desktop parados após cada ensaio. Nenhum login foi feito, nenhum valor secreto
@@ -77,14 +77,34 @@ O pedido de Documentos do primeiro experimento coincidiu com app e dados de
 ensaio dentro dessa pasta. Não foi demonstrado o gatilho exato. A segunda
 amostra e seus dados novos ficaram fora de Documentos e não pediram a permissão.
 
+## Reabertura e comparação por logs
+
+Em 17/10/2026, às 22:07, a mesma amostra foi reaberta pelo agente, a pedido do
+usuário, com a mesma pasta de dados descartável e sem login. Ela mostrou a tela
+deslogada padrão do Desktop: janela própria do app, logo Claude, “Continuar com
+o Google” e o aviso de cookies, que ficou sem resposta. Nenhum pedido do
+Chaveiro apareceu, e o app fechou limpo com ⌘Q.
+
+Os logs locais (`main.log`) dos três apps de teste mostram o mesmo fluxo
+deslogado (`sign_in_cookie_present: false`), com as mesmas rotinas do Desktop
+(Code, Cowork, `startup-sign-in`). A única diferença é o Chaveiro:
+
+| App | Travamento até o estado de login | `safeStorage` |
+|---|---|---|
+| Duo antigo (`b938c7d`) | 88,7 s (`event-loop-stall`) | `isEncryptionAvailable=false` após a negação |
+| 1º protótipo (auxiliares) | 41,0 s | `isEncryptionAvailable=false` após a negação |
+| Amostra `productName` (2 aberturas) | ~1 s | sem aviso |
+
+O registro do Duo antigo (G11) já descrevia `claude.ai/login` depois da negação.
+Portanto, a “introdução anterior do Desktop” não era um estado comparável, e a
+troca de `productName` não mudou a tela de entrada. O User-Agent não foi medido.
+O login real continua não testado.
+
 ## O que falta antes de integrar
 
-1. **Preservar a experiência Desktop.** O nome do app também participa do
-   [User-Agent do Electron](https://github.com/electron/electron/blob/v44.7.2/shell/common/application_info.cc).
-   Sua alteração é uma explicação possível para a página web observada. O
-   mecanismo exato dessa diferença ainda não foi confirmado. Avaliar uma
-   identificação de cliente compatível, fixa e verificável, sem alterar endpoints
-   ou autenticação, antes de pedir login ao usuário.
+1. ~~Preservar a experiência Desktop~~ **descartado em 17/10/2026, 22:07.**
+   A suspeita de uma página web diferente não se confirmou (ver
+   [reabertura](#reabertura-e-comparação-por-logs)).
 2. **Integrar verificações ao construtor de produção.** Ele atualmente recusa
    alterações no ASAR fora do plano existente. Não afrouxar essa política para
    instalar o protótipo. Uma integração precisa validar a mudança por membro,
