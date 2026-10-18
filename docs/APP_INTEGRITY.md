@@ -57,6 +57,12 @@ JS resource followed by local re-signing must fail the record check even if the
 new local signature passes. Entry scripts/workers fix PATH before resolving
 tools and use privileged-mode Bash to ignore inherited startup files/functions.
 
+If an entry's metadata moves while the tree is observed (for example macOS
+adding `com.apple.macl` to a bundle moments after it is published), the helper
+exits 75 instead of 1. Callers then repeat the **whole** check, up to three
+times, two seconds apart. Content or binding mismatches exit 1 and are never
+repeated, so a real change still fails on every attempt.
+
 ## Limits
 
 The record detects drift while it remains trusted. Its owner can rewrite both

@@ -79,7 +79,7 @@ build_one() (
     codesign --force -s - "$bundle/Contents/MacOS/Claude" || return 1
     codesign --force -s - "$bundle" || return 1
     ci_integrity_helper_valid || return 1
-    "$CI_INTEGRITY_HELPER" record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" "$product_changed" || return 1
+    ci_integrity_settled record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" "$product_changed" || return 1
     ci_verify_one "$bundle" "$idx" || return 1
     ci_prepare_data_dir "${dirs[$idx]}" desktop || return 1
     ci_prepare_data_dir "${code_dirs[$idx]}" code || return 1

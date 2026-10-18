@@ -21,6 +21,11 @@
 struct hashes { unsigned char full[32], unchanged[32]; };
 struct walk { const char *root; dev_t device; bool source, icon, product; size_t entries; };
 static void fail(const char *message) { fprintf(stderr, "integrity: %s\n", message); exit(1); }
+// Metadata moved while observing (e.g. macOS adding com.apple.macl right after
+// publication). Exit 75 lets callers re-run the whole check a bounded number
+// of times; content mismatches always exit 1 and are never retried.
+#define UNSTABLE_EXIT 75
+static void unstable(const char *message) { fprintf(stderr, "integrity: %s\n", message); exit(UNSTABLE_EXIT); }
 static void syserr(const char *message) { fprintf(stderr, "integrity: %s: %s\n", message, strerror(errno)); exit(1); }
 static struct stat info(int fd) { struct stat s; if (fstat(fd, &s)) syserr("cannot inspect descriptor"); return s; }
 static bool same(struct stat a, struct stat b) {
@@ -154,17 +159,17 @@ static struct hashes visit(int fd, const char *path, struct walk *walk, unsigned
             } else {
                 if (!S_ISREG(named.st_mode) && !S_ISDIR(named.st_mode)) fail("special app file");
                 int next = openat(fd, items[i], O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-                if (next < 0 || !same(named, info(next))) fail("app child changed during open");
+                if (next < 0 || !same(named, info(next))) unstable("app child changed during open");
                 child = visit(next, child_path, walk, depth + 1); close(next);
             }
-            struct stat after; if (fstatat(fd, items[i], &after, AT_SYMLINK_NOFOLLOW) || !same(named, after)) fail("named app child changed");
+            struct stat after; if (fstatat(fd, items[i], &after, AT_SYMLINK_NOFOLLOW) || !same(named, after)) unstable("named app child changed");
             number(&full, strlen(items[i])); update(&full, items[i], strlen(items[i])); update(&full, child.full, 32);
             if (!mutable(child_path, walk->icon, walk->product)) { number(&fixed, strlen(items[i])); update(&fixed, items[i], strlen(items[i])); update(&fixed, child.unchanged, 32); }
             free(items[i]);
         }
         free(items); finish(&full, result.full); finish(&fixed, result.unchanged);
     }
-    if (!same(before, info(fd))) fail("app changed during tree observation"); return result;
+    if (!same(before, info(fd))) unstable("app changed during tree observation"); return result;
 }
 static int root(const char *path, bool source, bool private) {
     if (path[0] != '/') fail("absolute path required");
@@ -176,7 +181,7 @@ static int root(const char *path, bool source, bool private) {
 static struct hashes tree(int fd, const char *path, bool source, bool icon, bool product) {
     struct walk walk = {.root = path, .device = info(fd).st_dev, .source = source, .icon = icon, .product = product, .entries = 0};
     struct hashes result = visit(fd, "", &walk, 0);
-    int named = root(path, source, false); if (!same(info(fd), info(named))) fail("app root path changed"); close(named); return result;
+    int named = root(path, source, false); if (!same(info(fd), info(named))) unstable("app root path changed"); close(named); return result;
 }
 static bool uuid(const char *id) {
     if (strlen(id) != 36) return false;

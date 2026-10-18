@@ -313,6 +313,19 @@ ci_integrity_binding() {
 ci_integrity_helper_valid() {
     [ -n "${CI_INTEGRITY_HELPER:-}" ] && [ -f "$CI_INTEGRITY_HELPER" ] && [ -x "$CI_INTEGRITY_HELPER" ] && [ ! -L "$CI_INTEGRITY_HELPER" ] && [ -O "$CI_INTEGRITY_HELPER" ] || { ci_error 'compiled integrity helper required; use the public entry script'; return 1; }
 }
+# Re-run the native integrity check, bounded, only when it reports that app
+# metadata moved during observation (exit 75); every attempt is a full check.
+ci_integrity_settled() {
+    local attempt=1 rc
+    while :; do
+        "$CI_INTEGRITY_HELPER" "$@" && return 0
+        rc=$?
+        [ "$rc" -eq 75 ] && [ "$attempt" -lt 3 ] || return 1
+        printf 'integrity: app metadata changed during observation; repeating the full check (%s/3)\n' "$((attempt + 1))" >&2
+        /bin/sleep 2
+        attempt=$((attempt + 1))
+    done
+}
 ci_verify_one() {
     local app="$1" idx="$2" id executable
     [ -d "$app" ] && [ ! -L "$app" ] || { ci_error "missing or symlinked app: $app"; return 1; }
@@ -324,7 +337,7 @@ ci_verify_one() {
     cmp -s "$app/Contents/MacOS/launcher" <(ci_render_launcher "$idx") || { ci_error 'launcher differs from expected configuration'; return 1; }
     codesign --verify --deep --strict --all-architectures "$app" || return 1
     ci_integrity_helper_valid || return 1
-    "$CI_INTEGRITY_HELPER" verify "$CI_ICONS/integrity" "$app" "$(ci_integrity_binding "$idx")" || return 1
+    ci_integrity_settled verify "$CI_ICONS/integrity" "$app" "$(ci_integrity_binding "$idx")" || return 1
 }
 
 ci_status() {
