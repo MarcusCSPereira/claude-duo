@@ -2,9 +2,44 @@
 
 Requisito acrescentado em 17/10/2026: a mesma pessoa usa duas contas e quer
 reaproveitar suas preferências, MCPs, skills e plugins sem configurar tudo à mão.
-Este documento é uma **proposta de implementação**. O importador e a
-sincronização ainda não existem; nenhum perfil em uso foi lido ou copiado para
-implementar a proposta.
+Este documento começou como **proposta de implementação**. Em 17/10/2026 o
+usuário escolheu um caminho mais simples, descrito logo abaixo e implementado;
+o importador seletivo completo continua como proposta.
+
+## Implementado: compartilhamento por links (decisão do usuário)
+
+[`scripts/share-code-profile.py`](../scripts/share-code-profile.py) faz o Code
+do Duo (`~/.claude-duo`) usar os **mesmos arquivos** do original (`~/.claude`):
+
+- Links: `CLAUDE.md`, `skills`, `output-styles`, `tools`, `plugins` e cada
+  `projects/<projeto>/memory`. Uma memória salva por um app aparece no outro.
+- `settings.json` é copiado **uma vez**. Ficam de fora chaves que escolhem
+  outra conta ou outro provedor (`apiKeyHelper`, `forceLogin*`, auxiliares de
+  credencial e `env` com `ANTHROPIC_*`, `AWS_*`, `CLAUDE_CODE_USE_*` etc.); só o
+  nome dessas chaves aparece na saída. `extraKnownMarketplaces` do Duo é mesclado.
+  Depois disso, ajustes no Duo são preservados.
+- Nunca lê nem grava `.claude.json`, sessões, histórico, transcrições
+  (`projects/*/*.jsonl`), caches, políticas ou estado de conta: só a lista acima.
+- Padrão é prévia sem alteração. `--apply` exige o Duo fechado. Item já
+  existente no Duo é recusado, ou movido (nunca apagado) para
+  `.share-backup-<data>` com `--backup-existing`. Links que apontam para outro
+  lugar, origens que já são links e pastas graváveis por outros são recusados.
+  Rodar de novo é idempotente e liga memórias de projetos novos do original;
+  memória que só existe no Duo é mantida e informada, sem mistura.
+
+Cuidados dessa escolha, que contraria a proposta original de cópias próprias:
+
+- Plugins, hooks e skills são código executável e passam a valer nos dois
+  apps. Instale e remova plugins pelo original; uma instalação feita no Duo
+  grava caminhos de `~/.claude-duo` no inventário compartilhado.
+- As duas contas leem e escrevem as mesmas memórias. Não guarde nelas
+  informação que uma das contas não deva ver.
+- Checkpoints do perfil Code do Duo passam a ser recusados, porque o helper
+  de checkpoint não segue links. Isso é intencional.
+- Um `--apply` interrompido pode deixar parte dos links. Rodar de novo completa
+  os que faltam; nada do original é alterado.
+- O script roda a partir do checkout revisado; não faz parte do conjunto
+  versionado de ferramentas.
 
 ## Comportamento pretendido
 
