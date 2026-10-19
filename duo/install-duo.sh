@@ -2,7 +2,8 @@
 # One-command Claude Duo setup from a reviewed checkout of this repository:
 # checks prerequisites, installs the pinned toolset, writes the Duo config,
 # installs the "Update Claude Duo" app and the update check, then builds
-# the Duo (asking before closing Claude). Safe to run again.
+# the Duo (asking before closing Claude). Run from inside Claude, it hands the
+# build to the "Update Claude Duo" app instead. Safe to run again.
 #   --no-auto-check   do not install the launch agent that asks after updates
 #   --no-build        prepare everything but do not build the Duo now
 DUO_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
@@ -98,12 +99,24 @@ if [ "$auto_check" = yes ]; then
     echo "Agent: $AGENT (checks every hour)"
 fi
 
+deferred=no
 if [ "$build" = yes ]; then
     step "Building Claude Duo"
     if [ -d "$DUO_APP" ] && [ "$(duo_version "$DUO_APP")" = "$(duo_version "$DUO_SOURCE_APP")" ] && duo_refresh --verify >/dev/null 2>&1; then
         echo "Claude Duo is already up to date and verified."
+    elif duo_inside_app "$DUO_SOURCE_APP" || duo_inside_app "$DUO_APP"; then
+        # Building quits the Claude this installer runs in; the updater app
+        # is launched by LaunchServices and survives that.
+        "$OPEN" -a "$UPDATER_APP" || fail 'could not open Update Claude Duo; open it from the Finder'
+        deferred=yes
+        printf 'This installer runs inside Claude (in the Code tab, for example), and building quits Claude.\nOpened "Update Claude Duo", which runs outside it: choose "%s" and wait for the notification that it finished.\n' "$(duo_t "Update now" "Atualizar agora")"
     else
         /bin/bash -p "$DUO_HOME/update-duo.sh" || fail "the build failed; see the log in $DUO_LOG_DIR"
     fi
 fi
-printf '\nDone. Open ~/Applications/Claude Duo and sign in with your second account.\nTo update later: open "Update Claude Duo" (or accept the prompt when Claude updates).\n'
+if [ "$deferred" = yes ]; then
+    printf '\nAlmost done. After the notification, open ~/Applications/Claude Duo and sign in with your second account.\n'
+else
+    printf '\nDone. Open ~/Applications/Claude Duo and sign in with your second account.\n'
+fi
+printf 'To update later: open "Update Claude Duo" (or accept the prompt when Claude updates).\n'

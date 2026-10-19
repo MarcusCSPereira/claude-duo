@@ -44,7 +44,10 @@ The installer:
 5. adds an hourly check that offers to update the Duo after Claude updates
    (skip it with `--no-auto-check`);
 6. builds the Duo. It **asks before quitting Claude**, because building needs
-   both apps closed, and reopens Claude at the end.
+   both apps closed, and reopens Claude at the end. When the installer runs
+   inside Claude (in the Code tab, for example), it does not build right away,
+   because that would end its own session: it opens **Update Claude Duo**,
+   which builds outside Claude.
 
 Then open **~/Applications/Claude Duo** and sign in with your second account.
 
@@ -56,6 +59,11 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
   You can also open **Update Claude Duo** at any time. Either way, both apps
   quit, the Duo is rebuilt and verified, and whatever was open reopens.
   Prompts and notifications follow your macOS language (English or Portuguese).
+- **Previous versions:** every update keeps the previous Duo in
+  `~/Applications/.claude-txn.*` and nothing prunes them, so they take up disk
+  space (up to the size of the app each). To inspect one, use the identifier
+  the log shows:
+  `CLAUDE_INSTANCES_CONF=~/.config/claude-instances/claude-duo.conf ~/.local/share/claude-instances/toolsets/dispatcher run claude-apps-refresh.sh --recover .claude-txn.XXXXXXXX`.
 - **Connectors (Google Drive, Slack…):** connect them in a private browser
   window signed in to the Duo's account (claude.ai → Settings → Connectors),
   then press ⌘R in the Duo. Connector sign-in started inside the Duo does not
@@ -69,6 +77,32 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 ```bash
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
+
+## loop-duo: one account develops, the other reviews (optional)
+
+With both Code accounts on this Mac, one can develop and the other review in
+the same repository, round after round, until the reviewer approves:
+
+```bash
+/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py run "goal" --repo ~/path/to/repo
+```
+
+- **Roles:** by default the original account develops and the Duo's reviews.
+  To swap them, use `--dev duo --reviewer original`.
+- **Branch:** the work goes to a `loop-duo/<goal>-<id>` branch, created from
+  HEAD in a worktree of its own. The reviewer runs without the edit tools,
+  and a reviewer turn that changes the branch anyway does not count. Untracked
+  files are never committed: they go back to the developer.
+- **Questions:** one agent's question goes to the other, because `claude -p`
+  has no way to ask the user.
+- **Ceilings:** `--rounds` (6) and `--max-cost` (estimated US$). Every round
+  uses both accounts' usage.
+- **PR:** `--until pr` pushes and opens a draft PR after approval. Merging
+  stays with you.
+- **Follow along:** `loop-duo.py list` shows the loops. The conversation
+  between the agents is in `~/.local/share/claude-duo/loops/<id>/conversation.md`.
+
+Details and limits: [docs/LOOP_DUO.md](docs/LOOP_DUO.md).
 
 ## How it works
 
@@ -105,19 +139,34 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 
 ## Uninstall
 
-1. Quit Claude Duo.
-2. Remove the update check:
+Quit Claude Duo and run:
 
 ```bash
-launchctl bootout gui/$(id -u)/io.github.guibrbs.claude-duo.update-check; rm -f ~/Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist
+~/claude-duo/duo/uninstall-duo.sh
 ```
 
-3. Move these to the Trash: `~/Applications/Claude Duo.app`,
-   `~/Applications/Update Claude Duo.app` and `~/.local/share/claude-duo`.
-4. The Duo account's data lives in `~/Library/Application Support/Claude-Duo`
-   and `~/.claude-duo`. If you used Code sharing, the shared items inside
-   `~/.claude-duo` are links: deleting them does not delete the originals in
-   `~/.claude`.
+The script shows the list and asks for confirmation. It then turns off the
+update check and moves everything into one folder in the Trash, deleting
+nothing:
+
+- `~/Applications/Claude Duo.app` and `~/Applications/Update Claude Duo.app`
+  (and the earlier `Atualizar Claude Duo.app`, if it is still there);
+- the update check, in `~/Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist`;
+- the Duo tools, in `~/.local/share/claude-duo`, and the config, in
+  `~/.config/claude-instances/claude-duo.conf`;
+- the logs, in `~/Library/Logs/Claude Duo Updater`;
+- the toolset, in `~/.local/share/claude-instances`, and the previous
+  versions, in `~/Applications/.claude-txn.*`. These two stay while another
+  config in `~/.config/claude-instances` still uses them.
+
+The Duo account's data stays unless you run it with `--include-account-data`.
+That moves the Desktop and Code profiles the config's Duo line names, by default
+`~/Library/Application Support/Claude-Duo` and `~/.claude-duo`. It never moves
+a folder outside the profile locations the toolset accepts for the Duo, such as
+the original's. If you
+used Code sharing, the shared items inside `~/.claude-duo` are links: moving
+them does not affect the originals in `~/.claude`. The `Duo Claude Safe
+Storage` item stays in the Keychain; delete it in Keychain Access if you want.
 
 ## Development
 

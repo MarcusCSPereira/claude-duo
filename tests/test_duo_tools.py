@@ -24,11 +24,16 @@ case "$*" in
 esac
 exit 0
 '''
-PS = '#!/bin/bash\ncat "$MOCK_DIR/running" 2>/dev/null\nexit 0\n'
+# ps -o ppid=,comm= -p PID answers MOCK_PARENT for any PID: one ancestor, then launchd.
+PS = '''#!/bin/bash
+case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;; *) cat "$MOCK_DIR/running" 2>/dev/null ;; esac
+exit 0
+'''
 OPEN = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/open.log"\n'
 DISPATCHER = '''#!/bin/bash
 printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
 [ "${MOCK_DISPATCH_FAIL:-}" != 1 ] || { echo "synthetic build failure" >&2; exit 1; }
+[ ! -e "$MOCK_DIR/dispatch-stale" ] || { echo "process 4242 (chrome-native-host) runs a deleted executable; quit it and retry" >&2; exit 1; }
 exit 0
 '''
 
@@ -96,7 +101,14 @@ class DuoToolsTests(unittest.TestCase):
         return path.read_text() if path.exists() else ""
 
     def running(self, *apps):
-        (self.mock / "running").write_text("".join(f"{app}/Contents/MacOS/Claude\n" for app in apps))
+        self.processes(*(f"{app}/Contents/MacOS/Claude" for app in apps))
+
+    def processes(self, *executables):
+        # Same shape as ps -axo pid=,comm=: right-aligned PID, then the executable.
+        (self.mock / "running").write_text("".join(f"{pid:5d} {exe}\n" for pid, exe in enumerate(executables, 501)))
+
+    def updater_log(self):
+        return "".join(p.read_text() for p in (self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
 
     # Update check (launch agent)
     def test_check_is_silent_when_versions_match(self):
@@ -159,6 +171,7 @@ class DuoToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
         self.assertIn("Could not quit", self.log("osascript.log"))
+        self.assertIn(f"still running (PID executable):\n  501 {self.source_app}/Contents/MacOS/Claude\n", self.updater_log())
 
     def test_build_failure_is_reported_and_claude_reopened(self):
         self.running(self.source_app)
@@ -167,8 +180,34 @@ class DuoToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("update failed", self.log("osascript.log"))
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}"])
-        logs = list((self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
-        self.assertTrue(any("synthetic build failure" in p.read_text() for p in logs))
+        self.assertIn("synthetic build failure", self.updater_log())
+
+    def test_process_running_a_deleted_executable_is_named_in_the_notification(self):
+        (self.mock / "dispatch-stale").write_text("1")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("chrome-native-host (PID 4242) still runs a file from the previous Claude", self.log("osascript.log"))
+        self.assertNotIn("update failed", self.log("osascript.log"))
+
+    def test_bundle_helpers_started_by_other_programs_do_not_block_the_update(self):
+        # Chrome starts chrome-native-host and the claude CLI starts disclaimer;
+        # both run from Contents/Helpers and survive quitting the app.
+        self.processes(f"{self.source_app}/Contents/Helpers/chrome-native-host",
+                       f"{self.source_app}/Contents/Helpers/disclaimer")
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duo", self.log("dispatcher.log"))
+        self.assertNotIn(" to quit", self.log("osascript.log"))
+        self.assertEqual(self.log("open.log"), "")
+
+    def test_electron_helpers_still_count_as_running(self):
+        helper = "Claude Helper (Renderer)"
+        self.processes(f"{self.source_app}/Contents/Frameworks/{helper}.app/Contents/MacOS/{helper}")
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log("dispatcher.log"), "")
 
     def test_config_pointer_outside_the_config_folder_is_refused(self):
         outside = self.root / "evil.conf"
@@ -275,6 +314,131 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
         self.assertEqual((self.tools / "config-path").read_text().strip(), str(manual))
         self.assertFalse((self.home / ".config/claude-instances/claude-duo.conf").exists())
+
+    def test_installer_inside_claude_hands_the_build_to_the_updater_app(self):
+        # Run from Claude's Code tab: building would quit the caller's own app.
+        installer = self.installer_fixture()
+        self.env["MOCK_PARENT"] = f"1 {self.source_app}/Contents/MacOS/Claude"
+        result = self.run_installer(installer, "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 0)
+        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Duo.app"])
+        self.assertIn("runs inside Claude", result.stdout)
+        self.assertIn('choose "Update now"', result.stdout)
+
+    def test_installer_from_a_terminal_claude_cli_builds_now(self):
+        # The CLI only puts Contents/Helpers/disclaimer in the chain.
+        installer = self.installer_fixture()
+        self.env["MOCK_PARENT"] = f"1 {self.source_app}/Contents/Helpers/disclaimer"
+        self.env["MOCK_ANSWER"] = "Update now"
+        result = self.run_installer(installer, "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 1)
+        self.assertNotIn("Update Claude Duo.app", self.log("open.log"))
+
+    # Uninstaller
+    def uninstall_fixture(self):
+        installer = self.installer_fixture()
+        self.assertEqual(self.run_installer(installer, "--no-build").returncode, 0)
+        code = self.patch((REPO / "duo/uninstall-duo.sh").read_text())
+        uninstaller = installer.parent / "uninstall-duo.sh"
+        uninstaller.write_text(code.replace("LAUNCHCTL=/bin/launchctl", f"LAUNCHCTL={self.mock}/launchctl"))
+        (self.home / "Library/Logs/Claude Duo Updater").mkdir(parents=True)
+        (self.home / "Library/Logs/Claude Duo Updater/update-1.log").write_text("OK\n")
+        (self.home / "Applications/.claude-txn.ABCDEFGH").mkdir()
+        self.account = [self.home / "Library/Application Support/Claude-Duo", self.home / ".claude-duo"]
+        for path in self.account:
+            path.mkdir(parents=True)
+            (path / "invented-account-data").write_text("keep")
+        return uninstaller
+
+    def uninstall(self, uninstaller, *args):
+        return subprocess.run(["/bin/bash", "-p", str(uninstaller), *args], env=self.env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=60)
+
+    def trashed(self):
+        folders = list((self.home / ".Trash").glob("Claude Duo uninstalled *"))
+        self.assertEqual(len(folders), 1)
+        return folders[0]
+
+    def test_uninstaller_moves_the_duo_to_the_trash_and_keeps_account_data(self):
+        uninstaller = self.uninstall_fixture()
+        (self.home / "Applications/Atualizar Claude Duo.app/Contents").mkdir(parents=True)  # From an earlier release.
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Duo.app",
+                 "Applications/Atualizar Claude Duo.app",
+                 "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist", ".local/share/claude-duo",
+                 ".config/claude-instances/claude-duo.conf", "Library/Logs/Claude Duo Updater",
+                 ".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH")
+        for relative in moved:
+            self.assertFalse((self.home / relative).exists(), relative)
+            self.assertTrue((self.trashed() / relative).exists(), relative)
+        self.assertFalse((self.home / ".config/claude-instances").exists())
+        for path in self.account:
+            self.assertEqual((path / "invented-account-data").read_text(), "keep")
+        self.assertIn("bootout", self.log("launchctl.log"))
+
+    def test_uninstaller_moves_account_data_only_when_asked(self):
+        uninstaller = self.uninstall_fixture()
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in self.account:
+            self.assertFalse(path.exists())
+            self.assertTrue((self.trashed() / path.relative_to(self.home) / "invented-account-data").exists())
+
+    def duo_line(self, desktop, env):
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.write_text(f"@mode original-copy\n@apps user\nDuo | io.github.tester.claude-duo | {desktop} | 212 | {env}\n")
+
+    def test_uninstaller_moves_the_account_folders_the_config_names(self):
+        uninstaller = self.uninstall_fixture()
+        managed = "Library/Application Support/Multi Claude Desktop/Profiles/0123abcd-4567-89ef-0123-456789abcdef/desktop"
+        self.duo_line(f"~/{managed}", "CLAUDE_CONFIG_DIR=~/.claude-work")
+        configured = [self.home / managed, self.home / ".claude-work"]
+        for path in configured:
+            path.mkdir(parents=True)
+            (path / "invented-account-data").write_text("duo")
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in configured:
+            self.assertFalse(path.exists())
+            self.assertTrue((self.trashed() / path.relative_to(self.home) / "invented-account-data").exists())
+        for path in self.account:  # The defaults are not this Duo's data any more.
+            self.assertEqual((path / "invented-account-data").read_text(), "keep")
+
+    def test_uninstaller_never_moves_folders_outside_duo_profile_locations(self):
+        uninstaller = self.uninstall_fixture()
+        self.duo_line("~/Library/Application Support/Claude", "CLAUDE_CONFIG_DIR=~/.claude")
+        originals = [self.home / "Library/Application Support/Claude", self.home / ".claude"]
+        for path in originals:
+            path.mkdir(parents=True)
+            (path / "original-account-data").write_text("keep")
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in originals:
+            self.assertEqual((path / "original-account-data").read_text(), "keep")
+        self.assertIn("not Duo profile locations", result.stdout)
+
+    def test_uninstaller_keeps_the_shared_toolset_while_another_config_uses_it(self):
+        uninstaller = self.uninstall_fixture()
+        (self.home / ".config/claude-instances/other.conf").write_text("@mode original-copy\n")
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.home / ".config/claude-instances/claude-duo.conf").exists())
+        for kept in (".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH", ".config/claude-instances/other.conf"):
+            self.assertTrue((self.home / kept).exists(), kept)
+
+    def test_uninstaller_changes_nothing_while_the_duo_runs_or_without_confirmation(self):
+        uninstaller = self.uninstall_fixture()
+        self.running(self.duo_app)
+        self.assertNotEqual(self.uninstall(uninstaller, "--yes").returncode, 0)
+        (self.mock / "running").unlink()
+        result = self.uninstall(uninstaller)  # no terminal to confirm and no --yes
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--yes", result.stderr)
+        self.assertTrue(self.duo_app.exists())
+        self.assertFalse((self.home / ".Trash").exists())
 
     def test_installer_refuses_without_prerequisites(self):
         installer = self.installer_fixture()

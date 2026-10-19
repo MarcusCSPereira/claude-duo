@@ -30,8 +30,9 @@ reopen() {
 }
 
 if ! duo_quit_both; then
-    log "apps did not quit within ${DUO_QUIT_TIMEOUT}s"
-    duo_notify "Claude Duo" "$(duo_t "Could not quit Claude and Claude Duo. Quit both and try again." "Não consegui fechar o Claude e o Claude Duo. Feche os dois e tente de novo.")"
+    log "apps did not quit within ${DUO_QUIT_TIMEOUT}s; still running (PID executable):"
+    { duo_app_processes "$DUO_SOURCE_APP"; duo_app_processes "$DUO_APP"; } | while IFS= read -r line; do log "  $line"; done
+    duo_notify "Claude Duo" "$(duo_t "Could not quit Claude and Claude Duo. Quit both and try again. Log: $LOG" "Não consegui fechar o Claude e o Claude Duo. Feche os dois e tente de novo. Log: $LOG")"
     exit 1
 fi
 duo_notify "Claude Duo" "$(duo_t "Updating Claude Duo… this takes about a minute." "Atualizando o Claude Duo… leva cerca de um minuto.")"
@@ -51,6 +52,17 @@ if [ "$status" -eq 0 ]; then
     duo_notify "Claude Duo" "$(duo_t "Claude Duo updated to $version and verified." "Claude Duo atualizado para $version e verificado.")"
 else
     log "FAILED ($status)"
-    duo_notify "Claude Duo" "$(duo_t "The update failed; the previous Claude Duo was kept. Log: $LOG" "A atualização falhou; o Claude Duo anterior foi mantido. Log: $LOG")"
+    # The native idle check names processes that run a deleted executable,
+    # typically a helper of the previous Claude kept alive by Chrome.
+    stale=""
+    while IFS= read -r line; do
+        case "$line" in "process "*") runs a deleted executable"*) stale="${line#process }"; break ;; esac
+    done < "$LOG"
+    if [ -n "$stale" ]; then
+        name="${stale#* (}"; name="${name%%) runs*}"; pid="${stale%% *}"
+        duo_notify "Claude Duo" "$(duo_t "Update stopped: $name (PID $pid) still runs a file from the previous Claude. Quit that process and try again. Log: $LOG" "A atualização parou: $name (PID $pid) ainda roda um arquivo da versão anterior do Claude. Encerre esse processo e tente de novo. Log: $LOG")"
+    else
+        duo_notify "Claude Duo" "$(duo_t "The update failed; the previous Claude Duo was kept. Log: $LOG" "A atualização falhou; o Claude Duo anterior foi mantido. Log: $LOG")"
+    fi
 fi
 exit "$status"

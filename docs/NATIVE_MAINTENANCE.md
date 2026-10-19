@@ -7,6 +7,12 @@ or exec changes. Missing observer PID, partial visibility or uncertain metadata
 returns unknown and refuses mutation. Confirmed gone/zombie processes are not
 active writers. APIs are in Apple's [libproc interface](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.h).
 
+A process whose executable was deleted has no path (`proc_pidpath` fails with
+`ENOENT`). This happens after Claude updates itself while Chrome keeps the old
+`chrome-native-host` alive. Such a process still makes the state unknown; the
+helper names each one on stderr with its PID and kernel process name, so the
+user knows what to quit.
+
 App-specific observation includes nested helpers under its `Contents/` path.
 Global observation recognizes Claude Desktop main/helper binaries and launchers.
 Rebuild/profile preparation, checkpoints and cache mutation require all observed

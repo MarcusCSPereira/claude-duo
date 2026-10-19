@@ -16,6 +16,17 @@ static bool maintenance_match(const char *executable, const char *app) {
     binary += strlen("/Contents/MacOS/");
     return !strcmp(binary, "Claude") || !strncmp(binary, "Claude Helper", 13) || !strcmp(binary, "launcher");
 }
+// Names a process whose executable path cannot be read. An old helper kept
+// alive after Claude updated itself runs a deleted file: the path is gone but
+// the kernel keeps the name it was started with. Non-printable bytes are masked.
+static void maintenance_report(pid_t pid, const struct proc_bsdinfo *info, int error) {
+    char name[sizeof(info->pbi_name) + 1]; size_t i = 0;
+    for (; i < sizeof(info->pbi_name) && info->pbi_name[i]; i++)
+        name[i] = info->pbi_name[i] >= ' ' && info->pbi_name[i] <= '~' ? info->pbi_name[i] : '?';
+    name[i] = '\0';
+    if (error == ENOENT) fprintf(stderr, "process %d (%s) runs a deleted executable; quit it and retry\n", (int)pid, name);
+    else fprintf(stderr, "process %d (%s) cannot be observed: %s\n", (int)pid, name, strerror(error));
+}
 // 0=running, 1=none observed, 2=unknown. Unknown can never authorize mutation.
 static int maintenance_process_state(const char *app) {
 #ifdef MCD_PROCESS_FIXTURE
@@ -43,7 +54,9 @@ static int maintenance_process_state(const char *app) {
         memset(first, 0, sizeof(first)); memset(second, 0, sizeof(second));
         if (proc_pidpath(pid, first, sizeof(first)) <= 0 || proc_pidpath(pid, second, sizeof(second)) <= 0 ||
             proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &after, sizeof(after)) != sizeof(after)) {
-            if (maintenance_gone(pid)) continue; result = 2; break;
+            int error = errno;
+            // Still unknown; keep scanning only to name every such process.
+            if (maintenance_gone(pid)) continue; maintenance_report(pid, &before, error); result = 2; continue;
         }
         if (after.pbi_status == SZOMB) continue;
         if (first[0] != '/' || !memchr(first, '\0', sizeof(first)) || !memchr(second, '\0', sizeof(second)) ||

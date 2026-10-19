@@ -59,12 +59,32 @@ duo_refresh() {
 
 duo_version() { "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 
-# True while any process runs from inside the given app bundle.
-duo_app_running() {
-    local prefix="$1/Contents/" line
-    while IFS= read -r line; do
-        case "$line" in "$prefix"*) return 0 ;; esac
-    done < <("$PS" -axo comm=)
+# Prints "PID executable" for the app and its Electron helpers. Helpers in
+# Contents/Helpers are started by other programs (chrome-native-host by
+# Chrome, disclaimer by the claude CLI) and outlive the app; as in the native
+# desktop-idle check (bin/claude-maintenance.h), only executables in a
+# Contents/MacOS count.
+duo_app_processes() {
+    local prefix="$1/Contents/" pid executable
+    while read -r pid executable; do
+        case "$executable" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) printf '%s %s\n' "$pid" "$executable" ;; esac
+    done < <("$PS" -axo pid=,comm=)
+}
+
+duo_app_running() { [ -n "$(duo_app_processes "$1")" ]; }
+
+# True when this script descends from the app, e.g. run from its Code tab:
+# quitting the app to build would also end the caller. A claude CLI in a
+# terminal only adds Contents/Helpers/disclaimer to the chain, which does
+# not count, so CLAUDECODE alone is not used.
+duo_inside_app() {
+    local prefix="$1/Contents/" pid=$$ ppid executable depth=0
+    while [ "$depth" -lt 64 ]; do
+        read -r ppid executable < <("$PS" -o ppid=,comm= -p "$pid") || return 1
+        case "$executable" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) return 0 ;; esac
+        case "$ppid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+        pid="$ppid"; depth=$((depth + 1))
+    done
     return 1
 }
 
