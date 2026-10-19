@@ -78,6 +78,30 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
 
+## loop-duo: one account develops, the other reviews (optional)
+
+With both Code accounts on this Mac, one can develop and the other review in
+the same repository, round after round, until the reviewer approves:
+
+```bash
+/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py run "goal" --repo ~/path/to/repo
+```
+
+- **Roles:** by default the original account develops and the Duo's reviews.
+  To swap them, use `--dev duo --reviewer original`.
+- **Branch:** the work goes to a `loop-duo/<goal>-<id>` branch, created from
+  HEAD in a worktree of its own. The reviewer runs without the edit tools.
+- **Questions:** one agent's question goes to the other, because `claude -p`
+  has no way to ask the user.
+- **Ceilings:** `--rounds` (6) and `--max-cost` (estimated US$). Every round
+  uses both accounts' usage.
+- **PR:** `--until pr` pushes and opens a draft PR after approval. Merging
+  stays with you.
+- **Follow along:** `loop-duo.py list` shows the loops. The conversation
+  between the agents is in `~/.local/share/claude-duo/loops/<id>/conversation.md`.
+
+Details and limits: [docs/LOOP_DUO.md](docs/LOOP_DUO.md).
+
 ## How it works
 
 - The Duo is a copy of the official `Claude.app` in `~/Applications` with its
