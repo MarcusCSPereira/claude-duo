@@ -29,6 +29,7 @@ OPEN = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/open.log"\n'
 DISPATCHER = '''#!/bin/bash
 printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
 [ "${MOCK_DISPATCH_FAIL:-}" != 1 ] || { echo "synthetic build failure" >&2; exit 1; }
+[ ! -e "$MOCK_DIR/dispatch-stale" ] || { echo "process 4242 (chrome-native-host) runs a deleted executable; quit it and retry" >&2; exit 1; }
 exit 0
 '''
 
@@ -176,6 +177,13 @@ class DuoToolsTests(unittest.TestCase):
         self.assertIn("update failed", self.log("osascript.log"))
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}"])
         self.assertIn("synthetic build failure", self.updater_log())
+
+    def test_process_running_a_deleted_executable_is_named_in_the_notification(self):
+        (self.mock / "dispatch-stale").write_text("1")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("chrome-native-host (PID 4242) still runs a file from the previous Claude", self.log("osascript.log"))
+        self.assertNotIn("update failed", self.log("osascript.log"))
 
     def test_bundle_helpers_started_by_other_programs_do_not_block_the_update(self):
         # Chrome starts chrome-native-host and the claude CLI starts disclaimer;

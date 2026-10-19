@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import select
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -169,6 +170,29 @@ class MaintenanceTests(unittest.TestCase):
         result = subprocess.run([str(self.helper), "run", str(self.apps), "/dev/null"], env=self.env,
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_process_running_a_deleted_executable_is_unknown_and_named(self):
+        # Claude's updater moves the old bundle away and deletes it; a helper it
+        # had started (Chrome's native host) keeps running the deleted file.
+        old = self.root / "Old.app"
+        executable = old / "Contents/Helpers/duo-stale-probe"
+        executable.parent.mkdir(parents=True)
+        source = self.root / "wait.c"
+        source.write_text('#include <unistd.h>\nint main(void) { char c; write(1,"READY\\n",6); return read(0,&c,1)<0; }\n')
+        subprocess.run(["/usr/bin/clang", str(source), "-o", str(executable)], check=True)
+        process = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(lambda: self.kill(process))
+        self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+        self.assertEqual(process.stdout.readline(), b"READY\n")
+        (self.root / "staged").mkdir()
+        old.rename(self.root / "staged/Old.app")
+        shutil.rmtree(self.root / "staged/Old.app")
+        result = subprocess.run([str(self.production), "desktop-idle"], env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(f"process {process.pid} (duo-stale-probe) runs a deleted executable; quit it and retry\n", result.stderr)
+        process.communicate(b"x", timeout=5)
+        result = subprocess.run([str(self.production), "desktop-idle"], env=self.env, text=True, capture_output=True)
+        self.assertNotIn("duo-stale-probe", result.stderr)
 
     def test_real_native_pid_path_observation_detects_only_selected_app_without_env_reads(self):
         app = self.apps / "Claude Synthetic.app"
