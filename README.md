@@ -90,8 +90,9 @@ the same repository, round after round, until the reviewer approves:
 - **Roles:** by default the original account develops and the Duo's reviews.
   To swap them, use `--dev duo --reviewer original`.
 - **Branch:** the work goes to a `loop-duo/<goal>-<id>` branch, created from
-  HEAD in a worktree of its own. The reviewer runs without the edit tools.
-  Untracked files are never committed: they go back to the developer.
+  HEAD in a worktree of its own. The reviewer runs without the edit tools,
+  and a reviewer turn that changes the branch anyway does not count. Untracked
+  files are never committed: they go back to the developer.
 - **Questions:** one agent's question goes to the other, because `claude -p`
   has no way to ask the user.
 - **Ceilings:** `--rounds` (6) and `--max-cost` (estimated US$). Every round

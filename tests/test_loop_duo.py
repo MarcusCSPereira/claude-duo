@@ -70,6 +70,13 @@ else:
     has_test = bool(list(Path(".").glob("test_add_*.py")))
     if "The developer asked" in request:
         text = block({"state": "answer", "answers": ["Python"]})
+    elif script == "reviewer_edits":
+        Path("add.py").write_text("def add(a, b):\n    return b + a\n")
+        text = block({"state": "approved", "summary": "fixed it myself"})
+    elif script == "reviewer_commits":
+        Path("add.py").write_text("def add(a, b):\n    return b + a\n")
+        git("commit", "-qam", "review: fix it myself")
+        text = block({"state": "approved", "summary": "fixed and committed it myself"})
     elif script == "reviewer_asks" and turn == 1:
         text = block({"state": "question", "questions": ["Why add.py?"]})
     elif script == "never_approves" or not has_test:
@@ -259,6 +266,16 @@ class LoopDuoTests(unittest.TestCase):
         self.assertNotIn(".env", pushed)
         self.assertTrue(any(name.startswith("test_add_") for name in pushed))
         self.assertTrue((Path(end["area"]["tree"]) / ".env").exists())  # Left in place, never committed.
+
+    def test_an_approval_does_not_count_when_the_reviewer_changed_the_branch(self):
+        for script, change in (("reviewer_edits", "tracked files changed: add.py"), ("reviewer_commits", "HEAD moved")):
+            with self.subTest(script=script):
+                process, end = self.loop("--until", "pr", FAKE_LOOP=script)
+                self.assertEqual((process.returncode, end["status"]), (1, "reviewer_edited"), process.stderr)
+                self.assertIn(change, end["reason"])
+                self.assertIn("does not count", end["reason"])
+                self.assertNotIn("pr", end)
+                self.assertFalse((self.home / "gh.args").exists())
 
     def test_no_automatic_merge_and_no_bypass(self):
         merge = self.run_script("run", "x", "--repo", str(self.repo), "--until", "merge")

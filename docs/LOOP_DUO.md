@@ -83,9 +83,14 @@ the other account must not inherit it. The Duo's account gets only its own
   path, asks the other agent or closes as `blocked`.
 - **Reviewer without edit tools:** it runs with
   `--disallowedTools Edit Write NotebookEdit`.
-- **This is not a sandbox.** The reviewer still runs commands (for the tests
-  and `git diff`). What holds the review in place is its role and the separate
-  branch.
+- **An approval covers only the developer's work.** The reviewer keeps Bash
+  for the tests and `git diff`, so it could still patch a file or commit. The
+  loop records HEAD and the tracked files before every reviewer turn; if
+  either changed when the turn ends, the loop stops as `reviewer_edited` and
+  the verdict does not count. Untracked files, such as test caches, are not
+  checked: the loop never commits them.
+- **This is not a sandbox.** The reviewer still runs commands. What holds the
+  review in place is its role, the separate branch and that check.
 
 ## Ceilings
 

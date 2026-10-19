@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -77,7 +78,8 @@ You are the REVIEWER in a loop-duo: two Claude Code agents, on different account
 repository. The other agent, the DEVELOPER, implements; you review every round against the goal and answer
 the developer's questions during the loop.
 
-- Do not edit files. Review by reading the code and running git diff, git log and the project's tests.
+- Do not edit files or commit. Review by reading the code and running git diff, git log and the project's
+  tests. A turn in which HEAD or a tracked file changes stops the loop, and its verdict does not count.
 - Point out what keeps the goal from being met, with file:line. Personal preference does not hold back
   approval: there are few rounds.
 - When the developer asks, decide as a tech lead would, by the goal, the code and the repository's
@@ -315,6 +317,31 @@ def untracked_files(area, limit=50):
     return listed.splitlines()[:limit]
 
 
+def tree_state(area):
+    """HEAD, the branch and the tracked changes of the worktree, to tell whether a turn changed them.
+
+    Untracked files are left out: a reviewer running the tests writes caches, and
+    the loop never commits untracked files anyway.
+    """
+    tree = area["tree"]
+    tracked = subprocess.run([GIT, "-C", tree, "diff", "HEAD", "--binary"], capture_output=True).stdout
+    return {"head": git(tree, "rev-parse", "HEAD", check=False),
+            "branch": git(tree, "rev-parse", "--abbrev-ref", "HEAD", check=False),
+            "tracked": hashlib.sha256(tracked).hexdigest(),
+            "files": git(tree, "diff", "HEAD", "--name-only", check=False).splitlines()}
+
+
+def tree_changes(before, after):
+    """What changed between two tree_state() snapshots, in words; empty when nothing did."""
+    changes = []
+    if (before["head"], before["branch"]) != (after["head"], after["branch"]):
+        changes.append(f"HEAD moved from {before['branch']} {before['head'][:10]} to {after['branch']} {after['head'][:10]}")
+    if before["tracked"] != after["tracked"]:
+        files = sorted(set(before["files"]) | set(after["files"])) or ["(tracked files)"]
+        changes.append("tracked files changed: " + ", ".join(files[:20]))
+    return "; ".join(changes)
+
+
 def commit_leftovers(area, round_number):
     """Commits the tracked changes the developer left uncommitted, so the reviewer sees a closed round.
 
@@ -394,6 +421,9 @@ def run_loop(goal, *, dev="original", reviewer="duo", folder=None, worktree=True
         who = f"{acct['id']} ({ROLE_NAMES[role]})"
         write(f"Round {state['round']} · loop → {who}", text)
         request = text
+        # The reviewer keeps Bash for the tests, so it could still edit or commit:
+        # a turn that changed the branch does not count, whatever its verdict.
+        before = tree_state(area) if role == "reviewer" else None
         for _ in range(2):
             end = converse(acct, state["sessions"][role], request, folder=area["tree"],
                            role_prompt=ROLE_DEV if role == "dev" else ROLE_REVIEWER, reviewer=role == "reviewer",
@@ -402,6 +432,11 @@ def run_loop(goal, *, dev="original", reviewer="duo", folder=None, worktree=True
             state["sessions"][role] = end["session"] or state["sessions"][role]
             state["cost_usd"] = round(state["cost_usd"] + (end["cost_usd"] or 0), 4)
             save()
+            changes = tree_changes(before, tree_state(area)) if before is not None else ""
+            if changes:
+                write(f"Round {state['round']} · loop", f"The reviewer changed the branch during its turn: {changes}.")
+                raise Stop("reviewer_edited", f"the reviewer changed the branch during its turn ({changes}); "
+                                              "its verdict does not count")
             if not end["ok"]:
                 raise Stop("failed", f"the {who} account did not answer: {end['error']}")
             answer = end["answer"] or ""
@@ -579,7 +614,7 @@ def main(argv=None):
             print("No loops yet.")
         for item in [] if args.json else loops:
             extra = f" · PR {item['pr']}" if item.get("pr") else ""
-            print(f"{item['id']}  {item['status']:<13} {item['dev']} → {item['reviewer']}  "
+            print(f"{item['id']}  {item['status']:<15} {item['dev']} → {item['reviewer']}  "
                   f"round {item['round']}/{item['max_rounds']}  US$ {item['cost_usd'] or 0:.2f}  {item['branch']}{extra}")
         return 0
 
