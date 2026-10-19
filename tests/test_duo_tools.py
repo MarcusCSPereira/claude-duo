@@ -170,6 +170,26 @@ class DuoToolsTests(unittest.TestCase):
         logs = list((self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
         self.assertTrue(any("synthetic build failure" in p.read_text() for p in logs))
 
+    def test_bundle_helpers_started_by_other_programs_do_not_block_the_update(self):
+        # Chrome starts chrome-native-host and the claude CLI starts disclaimer;
+        # both run from Contents/Helpers and survive quitting the app.
+        (self.mock / "running").write_text(f"{self.source_app}/Contents/Helpers/chrome-native-host\n"
+                                           f"{self.source_app}/Contents/Helpers/disclaimer\n")
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duo", self.log("dispatcher.log"))
+        self.assertNotIn(" to quit", self.log("osascript.log"))
+        self.assertEqual(self.log("open.log"), "")
+
+    def test_electron_helpers_still_count_as_running(self):
+        helper = "Claude Helper (Renderer)"
+        (self.mock / "running").write_text(f"{self.source_app}/Contents/Frameworks/{helper}.app/Contents/MacOS/{helper}\n")
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log("dispatcher.log"), "")
+
     def test_config_pointer_outside_the_config_folder_is_refused(self):
         outside = self.root / "evil.conf"
         outside.write_text("@mode original-copy\n")

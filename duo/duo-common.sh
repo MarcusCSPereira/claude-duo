@@ -59,11 +59,14 @@ duo_refresh() {
 
 duo_version() { "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 
-# True while any process runs from inside the given app bundle.
+# True while the app or its Electron helpers run. Helpers in Contents/Helpers
+# are started by other programs (chrome-native-host by Chrome, disclaimer by
+# the claude CLI) and outlive the app; as in the native desktop-idle check
+# (bin/claude-maintenance.h), only executables in a Contents/MacOS count.
 duo_app_running() {
     local prefix="$1/Contents/" line
     while IFS= read -r line; do
-        case "$line" in "$prefix"*) return 0 ;; esac
+        case "$line" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) return 0 ;; esac
     done < <("$PS" -axo comm=)
     return 1
 }
