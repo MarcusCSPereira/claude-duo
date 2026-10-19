@@ -46,14 +46,25 @@ elif role == "dev":
         text = block({"state": "question", "questions": [{"question": "Python or shell?", "options": ["Python", "shell"]}]})
     elif "The reviewer asked" in request:
         text = block({"state": "answer", "answers": ["because the project is already Python"]})
+    elif "not tracked by git" in request:
+        # Commits only the tests it meant to add; a .env stays untracked.
+        for test in sorted(Path(".").glob("test_add_*.py")):
+            git("add", str(test))
+        git("commit", "-q", "-m", "test: add")
+        text = block({"state": "review", "summary": "committed the test"})
     elif not Path("add.py").exists():
         Path("add.py").write_text("def add(a, b):\n    return a + b\n")
         git("add", "add.py")
         git("commit", "-q", "-m", "feat: add")
         text = block({"state": "review", "summary": "created add.py"})
     else:
-        # Left uncommitted on purpose: the loop commits leftovers before the review.
+        # Left uncommitted on purpose: the loop commits the tracked change and
+        # sends the untracked files back before the review.
+        with open("add.py", "a") as source:
+            source.write("# checked by the test\n")
         Path(f"test_add_{turn}.py").write_text("from add import add\n\nassert add(1, 2) == 3\n")
+        if script == "leaves_secret":
+            Path(".env").write_text("TOKEN=not-for-git\n")
         text = block({"state": "review", "summary": "added the test"})
 else:
     has_test = bool(list(Path(".").glob("test_add_*.py")))
@@ -140,7 +151,11 @@ class LoopDuoTests(unittest.TestCase):
         self.assertTrue(end["area"]["branch"].startswith("loop-duo/write-the-add-function-"))
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD", folder=tree), end["area"]["branch"])
         self.assertEqual(self.git("rev-parse", "HEAD"), self.base)
-        self.assertEqual(len(end["commits"]), 2)
+        # The untracked test went back to the developer, who committed it; the
+        # tracked leftover was committed by the loop.
+        self.assertTrue(any("not tracked by git" in c["request"] and "test_add_" in c["request"]
+                            for c in self.calls("dev")))
+        self.assertEqual(len(end["commits"]), 3)
         self.assertTrue(any("left uncommitted" in c for c in end["commits"]))
         self.assertEqual(self.git("status", "--porcelain", folder=tree), "")
         # The conversation stays readable, the state saved, both private.
@@ -228,6 +243,22 @@ class LoopDuoTests(unittest.TestCase):
         branch = end["area"]["branch"]
         self.assertEqual(subprocess.run(["/usr/bin/git", "-C", str(origin), "rev-parse", "--verify", branch],
                                         capture_output=True, env=self.env).returncode, 0)
+
+    def test_untracked_files_go_back_to_the_developer_and_never_reach_a_push(self):
+        origin = self.home / "origin.git"
+        subprocess.run(["/usr/bin/git", "init", "-q", "--bare", str(origin)], check=True, env=self.env)
+        self.git("remote", "add", "origin", str(origin))
+        process, end = self.loop("--until", "pr", FAKE_LOOP="leaves_secret")
+        self.assertEqual(end["status"], "approved", process.stderr)
+        asked = [c for c in self.calls("dev") if "not tracked by git" in c["request"]]
+        self.assertEqual(len(asked), 1)
+        self.assertIn(".env", asked[0]["request"])
+        self.assertIn("left out of every commit:\n- .env", self.calls("reviewer")[-1]["request"])
+        pushed = subprocess.run(["/usr/bin/git", "-C", str(origin), "ls-tree", "-r", "--name-only", end["area"]["branch"]],
+                                check=True, capture_output=True, text=True, env=self.env).stdout.split()
+        self.assertNotIn(".env", pushed)
+        self.assertTrue(any(name.startswith("test_add_") for name in pushed))
+        self.assertTrue((Path(end["area"]["tree"]) / ".env").exists())  # Left in place, never committed.
 
     def test_no_automatic_merge_and_no_bypass(self):
         merge = self.run_script("run", "x", "--repo", str(self.repo), "--until", "merge")

@@ -23,8 +23,11 @@ does not touch the apps.
    pending changes.
 2. The developer (the original account by default) gets the goal, works,
    commits and closes its turn with the `review` state.
-3. The loop commits whatever was left uncommitted, so the reviewer sees a
-   closed round.
+3. The loop commits the tracked changes left uncommitted, so the reviewer sees
+   a closed round. It never adds untracked files: a `.env`, a log or a dump a
+   test left behind could otherwise reach a push. It lists them to the
+   developer once per round, to commit or ignore, and whatever is still
+   untracked stays out of every commit; the reviewer is told about it.
 4. The reviewer (the Duo's account by default) gets the goal, the summary, the
    commits and the `diff --stat` since the base. It closes with `approved` or
    `changes`. The changes go back to the developer in the next round.

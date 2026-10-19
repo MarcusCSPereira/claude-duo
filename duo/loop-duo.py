@@ -309,11 +309,21 @@ def prepare_area(folder, loop_id, goal, worktree):
             "from": None if source_branch == "HEAD" else source_branch, "worktree": worktree}
 
 
+def untracked_files(area, limit=50):
+    """Untracked paths in the worktree that no .gitignore covers (a whole untracked folder as one line)."""
+    listed = git(area["tree"], "ls-files", "--others", "--exclude-standard", "--directory", check=False)
+    return listed.splitlines()[:limit]
+
+
 def commit_leftovers(area, round_number):
-    """Commits what the developer left uncommitted, so the reviewer sees a closed round."""
-    if not git(area["tree"], "status", "--porcelain"):
+    """Commits the tracked changes the developer left uncommitted, so the reviewer sees a closed round.
+
+    Untracked files are never added: a .env, a log or a dump a test left behind
+    would otherwise be committed and, with --until pr, pushed.
+    """
+    if not git(area["tree"], "status", "--porcelain", "--untracked-files=no"):
         return False
-    git(area["tree"], "add", "-A")
+    git(area["tree"], "add", "-u")
     done = subprocess.run([GIT, "-C", area["tree"], "commit", "-q", "-m",
                            f"loop-duo: round {round_number} (left uncommitted)"], capture_output=True, text=True)
     return done.returncode == 0
@@ -423,6 +433,13 @@ def run_loop(goal, *, dev="original", reviewer="duo", folder=None, worktree=True
             said = speak(role, f"Answers from the {ROLE_NAMES[other]}:\n\n{pairs}{comment}\n\nGo on from where you stopped.")
         return said
 
+    def hand_in(text):
+        """The developer's turn until it hands in the round: its summary, or Stop when it is blocked."""
+        said = settle("dev", speak("dev", text))
+        if said["block"]["state"] == "blocked":
+            raise Stop("blocked", str(said["block"].get("reason") or said["text"] or "no reason given"))
+        return str(said["block"].get("summary") or said["text"][-1500:])
+
     say(f"loop-duo {loop_id}: {dev} develops, {reviewer} reviews · branch {area['branch']} · {area['tree']}")
     write("Goal", goal)
     save()
@@ -433,17 +450,26 @@ def run_loop(goal, *, dev="original", reviewer="duo", folder=None, worktree=True
         for round_number in range(1, rounds + 1):
             state["round"] = round_number
             say(f"round {round_number}: {dev} develops")
-            said = settle("dev", speak("dev", request))
-            if said["block"]["state"] == "blocked":
-                raise Stop("blocked", str(said["block"].get("reason") or said["text"] or "no reason given"))
-            summary = str(said["block"].get("summary") or said["text"][-1500:])
+            summary = hand_in(request)
+            untracked = untracked_files(area)
+            if untracked:
+                # Once per round: whatever is still untracked stays out of every commit.
+                say(f"round {round_number}: {len(untracked)} untracked path(s) back to the developer")
+                summary += "\n\n" + hand_in(
+                    "These paths are not tracked by git, and the loop never commits untracked files:\n\n"
+                    + "\n".join(f"- {path}" for path in untracked)
+                    + "\n\nCommit the ones that belong to the change. Add the others to .gitignore or delete "
+                    "them. Then close with \"review\" again.")
+                untracked = untracked_files(area)
             commit_leftovers(area, round_number)
             commits = git(area["tree"], "log", "--oneline", f"{area['base']}..HEAD", check=False) or "(none)"
             changed = git(area["tree"], "diff", "--stat", area["base"], check=False) or "(nothing)"
+            left_out = ("\n\nUntracked paths, left out of every commit:\n" + "\n".join(f"- {path}" for path in untracked)
+                        if untracked else "")
             say(f"round {round_number}: {reviewer} reviews")
             review = settle("reviewer", speak("reviewer", (
                 f"LOOP GOAL:\n\n{goal.strip()}\n\nROUND {round_number}. The developer handed in:\n\n{summary}\n\n"
-                f"Commits since the base ({area['base'][:10]}):\n{commits}\n\nChanged files:\n{changed}\n\n"
+                f"Commits since the base ({area['base'][:10]}):\n{commits}\n\nChanged files:\n{changed}{left_out}\n\n"
                 f"Review (git diff {area['base'][:10]}) and close with \"approved\" or \"changes\".")))
             if review["block"]["state"] == "approved":
                 verdict = str(review["block"].get("summary") or review["text"] or "approved")

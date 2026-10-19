@@ -91,6 +91,7 @@ the same repository, round after round, until the reviewer approves:
   To swap them, use `--dev duo --reviewer original`.
 - **Branch:** the work goes to a `loop-duo/<goal>-<id>` branch, created from
   HEAD in a worktree of its own. The reviewer runs without the edit tools.
+  Untracked files are never committed: they go back to the developer.
 - **Questions:** one agent's question goes to the other, because `claude -p`
   has no way to ask the user.
 - **Ceilings:** `--rounds` (6) and `--max-cost` (estimated US$). Every round
