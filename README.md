@@ -59,6 +59,11 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
   You can also open **Update Claude Duo** at any time. Either way, both apps
   quit, the Duo is rebuilt and verified, and whatever was open reopens.
   Prompts and notifications follow your macOS language (English or Portuguese).
+- **Previous versions:** every update keeps the previous Duo in
+  `~/Applications/.claude-txn.*` and nothing prunes them, so they take up disk
+  space (up to the size of the app each). To inspect one, use the identifier
+  the log shows:
+  `CLAUDE_INSTANCES_CONF=~/.config/claude-instances/claude-duo.conf ~/.local/share/claude-instances/toolsets/dispatcher run claude-apps-refresh.sh --recover .claude-txn.XXXXXXXX`.
 - **Connectors (Google Drive, Slack…):** connect them in a private browser
   window signed in to the Duo's account (claude.ai → Settings → Connectors),
   then press ⌘R in the Duo. Connector sign-in started inside the Duo does not
