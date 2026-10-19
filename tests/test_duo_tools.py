@@ -336,6 +336,77 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 1)
         self.assertNotIn("Update Claude Duo.app", self.log("open.log"))
 
+    # Uninstaller
+    def uninstall_fixture(self):
+        installer = self.installer_fixture()
+        self.assertEqual(self.run_installer(installer, "--no-build").returncode, 0)
+        code = self.patch((REPO / "duo/uninstall-duo.sh").read_text())
+        uninstaller = installer.parent / "uninstall-duo.sh"
+        uninstaller.write_text(code.replace("LAUNCHCTL=/bin/launchctl", f"LAUNCHCTL={self.mock}/launchctl"))
+        (self.home / "Library/Logs/Claude Duo Updater").mkdir(parents=True)
+        (self.home / "Library/Logs/Claude Duo Updater/update-1.log").write_text("OK\n")
+        (self.home / "Applications/.claude-txn.ABCDEFGH").mkdir()
+        self.account = [self.home / "Library/Application Support/Claude-Duo", self.home / ".claude-duo"]
+        for path in self.account:
+            path.mkdir(parents=True)
+            (path / "invented-account-data").write_text("keep")
+        return uninstaller
+
+    def uninstall(self, uninstaller, *args):
+        return subprocess.run(["/bin/bash", "-p", str(uninstaller), *args], env=self.env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=60)
+
+    def trashed(self):
+        folders = list((self.home / ".Trash").glob("Claude Duo uninstalled *"))
+        self.assertEqual(len(folders), 1)
+        return folders[0]
+
+    def test_uninstaller_moves_the_duo_to_the_trash_and_keeps_account_data(self):
+        uninstaller = self.uninstall_fixture()
+        (self.home / "Applications/Atualizar Claude Duo.app/Contents").mkdir(parents=True)  # From an earlier release.
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Duo.app",
+                 "Applications/Atualizar Claude Duo.app",
+                 "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist", ".local/share/claude-duo",
+                 ".config/claude-instances/claude-duo.conf", "Library/Logs/Claude Duo Updater",
+                 ".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH")
+        for relative in moved:
+            self.assertFalse((self.home / relative).exists(), relative)
+            self.assertTrue((self.trashed() / relative).exists(), relative)
+        self.assertFalse((self.home / ".config/claude-instances").exists())
+        for path in self.account:
+            self.assertEqual((path / "invented-account-data").read_text(), "keep")
+        self.assertIn("bootout", self.log("launchctl.log"))
+
+    def test_uninstaller_moves_account_data_only_when_asked(self):
+        uninstaller = self.uninstall_fixture()
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in self.account:
+            self.assertFalse(path.exists())
+            self.assertTrue((self.trashed() / path.relative_to(self.home) / "invented-account-data").exists())
+
+    def test_uninstaller_keeps_the_shared_toolset_while_another_config_uses_it(self):
+        uninstaller = self.uninstall_fixture()
+        (self.home / ".config/claude-instances/other.conf").write_text("@mode original-copy\n")
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.home / ".config/claude-instances/claude-duo.conf").exists())
+        for kept in (".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH", ".config/claude-instances/other.conf"):
+            self.assertTrue((self.home / kept).exists(), kept)
+
+    def test_uninstaller_changes_nothing_while_the_duo_runs_or_without_confirmation(self):
+        uninstaller = self.uninstall_fixture()
+        self.running(self.duo_app)
+        self.assertNotEqual(self.uninstall(uninstaller, "--yes").returncode, 0)
+        (self.mock / "running").unlink()
+        result = self.uninstall(uninstaller)  # no terminal to confirm and no --yes
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--yes", result.stderr)
+        self.assertTrue(self.duo_app.exists())
+        self.assertFalse((self.home / ".Trash").exists())
+
     def test_installer_refuses_without_prerequisites(self):
         installer = self.installer_fixture()
         (self.home / "Applications").chmod(0o755)

@@ -108,19 +108,31 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 
 ## Uninstall
 
-1. Quit Claude Duo.
-2. Remove the update check:
+Quit Claude Duo and run:
 
 ```bash
-launchctl bootout gui/$(id -u)/io.github.guibrbs.claude-duo.update-check; rm -f ~/Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist
+~/claude-duo/duo/uninstall-duo.sh
 ```
 
-3. Move these to the Trash: `~/Applications/Claude Duo.app`,
-   `~/Applications/Update Claude Duo.app` and `~/.local/share/claude-duo`.
-4. The Duo account's data lives in `~/Library/Application Support/Claude-Duo`
-   and `~/.claude-duo`. If you used Code sharing, the shared items inside
-   `~/.claude-duo` are links: deleting them does not delete the originals in
-   `~/.claude`.
+The script shows the list and asks for confirmation. It then turns off the
+update check and moves everything into one folder in the Trash, deleting
+nothing:
+
+- `~/Applications/Claude Duo.app` and `~/Applications/Update Claude Duo.app`
+  (and the earlier `Atualizar Claude Duo.app`, if it is still there);
+- the update check, in `~/Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist`;
+- the Duo tools, in `~/.local/share/claude-duo`, and the config, in
+  `~/.config/claude-instances/claude-duo.conf`;
+- the logs, in `~/Library/Logs/Claude Duo Updater`;
+- the toolset, in `~/.local/share/claude-instances`, and the previous
+  versions, in `~/Applications/.claude-txn.*`. These two stay while another
+  config in `~/.config/claude-instances` still uses them.
+
+The Duo account's data, in `~/Library/Application Support/Claude-Duo` and
+`~/.claude-duo`, stays unless you run it with `--include-account-data`. If you
+used Code sharing, the shared items inside `~/.claude-duo` are links: moving
+them does not affect the originals in `~/.claude`. The `Duo Claude Safe
+Storage` item stays in the Keychain; delete it in Keychain Access if you want.
 
 ## Development
 
