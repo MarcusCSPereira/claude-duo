@@ -387,6 +387,39 @@ class DuoToolsTests(unittest.TestCase):
             self.assertFalse(path.exists())
             self.assertTrue((self.trashed() / path.relative_to(self.home) / "invented-account-data").exists())
 
+    def duo_line(self, desktop, env):
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.write_text(f"@mode original-copy\n@apps user\nDuo | io.github.tester.claude-duo | {desktop} | 212 | {env}\n")
+
+    def test_uninstaller_moves_the_account_folders_the_config_names(self):
+        uninstaller = self.uninstall_fixture()
+        managed = "Library/Application Support/Multi Claude Desktop/Profiles/0123abcd-4567-89ef-0123-456789abcdef/desktop"
+        self.duo_line(f"~/{managed}", "CLAUDE_CONFIG_DIR=~/.claude-work")
+        configured = [self.home / managed, self.home / ".claude-work"]
+        for path in configured:
+            path.mkdir(parents=True)
+            (path / "invented-account-data").write_text("duo")
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in configured:
+            self.assertFalse(path.exists())
+            self.assertTrue((self.trashed() / path.relative_to(self.home) / "invented-account-data").exists())
+        for path in self.account:  # The defaults are not this Duo's data any more.
+            self.assertEqual((path / "invented-account-data").read_text(), "keep")
+
+    def test_uninstaller_never_moves_folders_outside_duo_profile_locations(self):
+        uninstaller = self.uninstall_fixture()
+        self.duo_line("~/Library/Application Support/Claude", "CLAUDE_CONFIG_DIR=~/.claude")
+        originals = [self.home / "Library/Application Support/Claude", self.home / ".claude"]
+        for path in originals:
+            path.mkdir(parents=True)
+            (path / "original-account-data").write_text("keep")
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in originals:
+            self.assertEqual((path / "original-account-data").read_text(), "keep")
+        self.assertIn("not Duo profile locations", result.stdout)
+
     def test_uninstaller_keeps_the_shared_toolset_while_another_config_uses_it(self):
         uninstaller = self.uninstall_fixture()
         (self.home / ".config/claude-instances/other.conf").write_text("@mode original-copy\n")

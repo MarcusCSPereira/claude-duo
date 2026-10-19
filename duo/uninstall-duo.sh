@@ -4,8 +4,10 @@
 # config in ~/.config/claude-instances uses them. Everything is moved to one
 # folder in the Trash, never deleted, and the list is shown before asking.
 # The Duo account data (Desktop and Code profiles) and the Keychain item stay.
-#   --include-account-data   also move ~/Library/Application Support/Claude-Duo
-#                            and ~/.claude-duo to the Trash
+#   --include-account-data   also move the Duo's Desktop and Code profiles, as
+#                            the config's Duo line names them (by default
+#                            ~/Library/Application Support/Claude-Duo and
+#                            ~/.claude-duo), to the Trash
 #   --yes                    do not ask before moving
 DUO_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 source "$DUO_TOOLS/duo-common.sh" || exit 1
@@ -37,12 +39,54 @@ for file in "$CONFIGS"/*.conf; do
     [ -e "$file" ] && [ "$file" != "$config" ] && others=yes
 done
 
+trim() { local value="${1#"${1%%[![:space:]]*}"}"; printf '%s' "${value%"${value##*[![:space:]]}"}"; }
+expand_home() { case "$1" in '~/'*) printf '%s/%s' "$HOME" "${1#\~/}" ;; *) printf '%s' "$1" ;; esac; }
+# True for the Duo profile locations the toolset accepts for a managed copy
+# (bin/claude-instances-common.sh): a flat Claude-* or .claude-* folder, or a
+# managed UUID profile. The original's own folders never match.
+is_duo_profile() {
+    local kind="$1" path="$2" leaf
+    case "$path/" in *'/../'*|*'/./'*|*'//'*) return 1 ;; esac
+    [[ "$path" != *[[:cntrl:]]* ]] || return 1
+    case "$kind:$path" in
+        "$kind:$PROFILES/"*) [[ "${path#"$PROFILES/"}" =~ ^$UUID/$kind$ ]]; return ;;
+        "desktop:$HOME/Library/Application Support/Claude-"*) leaf="${path#"$HOME/Library/Application Support/Claude-"}" ;;
+        "code:$HOME/.claude-"*) leaf="${path#"$HOME/.claude-"}" ;;
+        *) return 1 ;;
+    esac
+    [ -n "$leaf" ] && [[ "$leaf" != */* ]]
+}
+PROFILES="$HOME/Library/Application Support/Multi Claude Desktop/Profiles"
+UUID='[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}'
+# The account data is where the Duo line says: its Desktop profile (third
+# column) and its CLAUDE_CONFIG_DIR. The defaults apply only without a config.
+account_dirs=("$HOME/Library/Application Support/Claude-Duo" "$HOME/.claude-duo")
+refused=()
+if [ -f "$config" ] && [ ! -L "$config" ]; then
+    account_dirs=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%%#*}"
+        IFS='|' read -r name _bundle desktop _hue env _extra <<<"$line"
+        [ "$(trim "$name")" = Duo ] || continue
+        desktop="$(expand_home "$(trim "$desktop")")"
+        if is_duo_profile desktop "$desktop"; then account_dirs+=("$desktop"); else refused+=("$desktop"); fi
+        IFS=';' read -ra pairs <<<"${env:-}"
+        for pair in "${pairs[@]-}"; do
+            pair="$(trim "$pair")"
+            case "$pair" in CLAUDE_CONFIG_DIR=*)
+                code="$(expand_home "$(trim "${pair#CLAUDE_CONFIG_DIR=}")")"
+                if is_duo_profile code "$code"; then account_dirs+=("$code"); else refused+=("$code"); fi ;;
+            esac
+        done
+    done < "$config"
+fi
+
 items=("$DUO_APP" "$UPDATER_APP" "$LEGACY_UPDATER_APP" "$AGENT" "$DUO_HOME" "$config" "$DUO_LOG_DIR")
 if [ "$others" = no ]; then
     items+=("$TOOLSET")
     for txn in "$HOME/Applications"/.claude-txn.*; do items+=("$txn"); done
 fi
-[ "$account" = no ] || items+=("$HOME/Library/Application Support/Claude-Duo" "$HOME/.claude-duo")
+[ "$account" = no ] || [ "${#account_dirs[@]}" -eq 0 ] || items+=("${account_dirs[@]}")
 present=()
 for item in "${items[@]}"; do
     [ -e "$item" ] || [ -L "$item" ] && present+=("$item")
@@ -52,7 +96,12 @@ done
 echo 'Moving to the Trash:'
 printf '  %s\n' "${present[@]}"
 [ "$others" = no ] || printf 'Keeping %s and %s/.claude-txn.*: another config in %s still uses them.\n' "$TOOLSET" "$HOME/Applications" "$CONFIGS"
-[ "$account" = yes ] || echo 'Keeping the Duo account data: ~/Library/Application Support/Claude-Duo and ~/.claude-duo (add --include-account-data to move them too).'
+if [ "$account" = no ]; then
+    [ "${#account_dirs[@]}" -eq 0 ] || { echo 'Keeping the Duo account data (add --include-account-data to move it too):'; printf '  %s\n' "${account_dirs[@]}"; }
+elif [ "${#refused[@]}" -gt 0 ]; then
+    echo 'Keeping these folders from the Duo line: they are not Duo profile locations:'
+    printf '  %s\n' "${refused[@]}"
+fi
 if [ "$ask" = yes ]; then
     [ -t 0 ] || fail 'no terminal to confirm; run again with --yes'
     read -r -p 'Continue? [y/N] ' answer

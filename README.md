@@ -157,8 +157,11 @@ nothing:
   versions, in `~/Applications/.claude-txn.*`. These two stay while another
   config in `~/.config/claude-instances` still uses them.
 
-The Duo account's data, in `~/Library/Application Support/Claude-Duo` and
-`~/.claude-duo`, stays unless you run it with `--include-account-data`. If you
+The Duo account's data stays unless you run it with `--include-account-data`.
+That moves the Desktop and Code profiles the config's Duo line names, by default
+`~/Library/Application Support/Claude-Duo` and `~/.claude-duo`. It never moves
+a folder outside the profile locations the toolset accepts for the Duo, such as
+the original's. If you
 used Code sharing, the shared items inside `~/.claude-duo` are links: moving
 them does not affect the originals in `~/.claude`. The `Duo Claude Safe
 Storage` item stays in the Keychain; delete it in Keychain Access if you want.
