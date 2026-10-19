@@ -24,7 +24,11 @@ case "$*" in
 esac
 exit 0
 '''
-PS = '#!/bin/bash\ncat "$MOCK_DIR/running" 2>/dev/null\nexit 0\n'
+# ps -o ppid=,comm= -p PID answers MOCK_PARENT for any PID: one ancestor, then launchd.
+PS = '''#!/bin/bash
+case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;; *) cat "$MOCK_DIR/running" 2>/dev/null ;; esac
+exit 0
+'''
 OPEN = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/open.log"\n'
 DISPATCHER = '''#!/bin/bash
 printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
@@ -310,6 +314,27 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
         self.assertEqual((self.tools / "config-path").read_text().strip(), str(manual))
         self.assertFalse((self.home / ".config/claude-instances/claude-duo.conf").exists())
+
+    def test_installer_inside_claude_hands_the_build_to_the_updater_app(self):
+        # Run from Claude's Code tab: building would quit the caller's own app.
+        installer = self.installer_fixture()
+        self.env["MOCK_PARENT"] = f"1 {self.source_app}/Contents/MacOS/Claude"
+        result = self.run_installer(installer, "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 0)
+        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Duo.app"])
+        self.assertIn("runs inside Claude", result.stdout)
+        self.assertIn('choose "Update now"', result.stdout)
+
+    def test_installer_from_a_terminal_claude_cli_builds_now(self):
+        # The CLI only puts Contents/Helpers/disclaimer in the chain.
+        installer = self.installer_fixture()
+        self.env["MOCK_PARENT"] = f"1 {self.source_app}/Contents/Helpers/disclaimer"
+        self.env["MOCK_ANSWER"] = "Update now"
+        result = self.run_installer(installer, "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 1)
+        self.assertNotIn("Update Claude Duo.app", self.log("open.log"))
 
     def test_installer_refuses_without_prerequisites(self):
         installer = self.installer_fixture()

@@ -73,6 +73,21 @@ duo_app_processes() {
 
 duo_app_running() { [ -n "$(duo_app_processes "$1")" ]; }
 
+# True when this script descends from the app, e.g. run from its Code tab:
+# quitting the app to build would also end the caller. A claude CLI in a
+# terminal only adds Contents/Helpers/disclaimer to the chain, which does
+# not count, so CLAUDECODE alone is not used.
+duo_inside_app() {
+    local prefix="$1/Contents/" pid=$$ ppid executable depth=0
+    while [ "$depth" -lt 64 ]; do
+        read -r ppid executable < <("$PS" -o ppid=,comm= -p "$pid") || return 1
+        case "$executable" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) return 0 ;; esac
+        case "$ppid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+        pid="$ppid"; depth=$((depth + 1))
+    done
+    return 1
+}
+
 duo_quit_app() {
     local app="$1" identifier
     duo_app_running "$app" || return 0

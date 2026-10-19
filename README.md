@@ -44,7 +44,10 @@ The installer:
 5. adds an hourly check that offers to update the Duo after Claude updates
    (skip it with `--no-auto-check`);
 6. builds the Duo. It **asks before quitting Claude**, because building needs
-   both apps closed, and reopens Claude at the end.
+   both apps closed, and reopens Claude at the end. When the installer runs
+   inside Claude (in the Code tab, for example), it does not build right away,
+   because that would end its own session: it opens **Update Claude Duo**,
+   which builds outside Claude.
 
 Then open **~/Applications/Claude Duo** and sign in with your second account.
 
