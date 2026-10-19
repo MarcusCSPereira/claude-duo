@@ -96,7 +96,14 @@ class DuoToolsTests(unittest.TestCase):
         return path.read_text() if path.exists() else ""
 
     def running(self, *apps):
-        (self.mock / "running").write_text("".join(f"{app}/Contents/MacOS/Claude\n" for app in apps))
+        self.processes(*(f"{app}/Contents/MacOS/Claude" for app in apps))
+
+    def processes(self, *executables):
+        # Same shape as ps -axo pid=,comm=: right-aligned PID, then the executable.
+        (self.mock / "running").write_text("".join(f"{pid:5d} {exe}\n" for pid, exe in enumerate(executables, 501)))
+
+    def updater_log(self):
+        return "".join(p.read_text() for p in (self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
 
     # Update check (launch agent)
     def test_check_is_silent_when_versions_match(self):
@@ -159,6 +166,7 @@ class DuoToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
         self.assertIn("Could not quit", self.log("osascript.log"))
+        self.assertIn(f"still running (PID executable):\n  501 {self.source_app}/Contents/MacOS/Claude\n", self.updater_log())
 
     def test_build_failure_is_reported_and_claude_reopened(self):
         self.running(self.source_app)
@@ -167,14 +175,13 @@ class DuoToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("update failed", self.log("osascript.log"))
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}"])
-        logs = list((self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
-        self.assertTrue(any("synthetic build failure" in p.read_text() for p in logs))
+        self.assertIn("synthetic build failure", self.updater_log())
 
     def test_bundle_helpers_started_by_other_programs_do_not_block_the_update(self):
         # Chrome starts chrome-native-host and the claude CLI starts disclaimer;
         # both run from Contents/Helpers and survive quitting the app.
-        (self.mock / "running").write_text(f"{self.source_app}/Contents/Helpers/chrome-native-host\n"
-                                           f"{self.source_app}/Contents/Helpers/disclaimer\n")
+        self.processes(f"{self.source_app}/Contents/Helpers/chrome-native-host",
+                       f"{self.source_app}/Contents/Helpers/disclaimer")
         self.env["MOCK_STUCK"] = "1"
         result = self.run_tool("update-duo.sh", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -184,7 +191,7 @@ class DuoToolsTests(unittest.TestCase):
 
     def test_electron_helpers_still_count_as_running(self):
         helper = "Claude Helper (Renderer)"
-        (self.mock / "running").write_text(f"{self.source_app}/Contents/Frameworks/{helper}.app/Contents/MacOS/{helper}\n")
+        self.processes(f"{self.source_app}/Contents/Frameworks/{helper}.app/Contents/MacOS/{helper}")
         self.env["MOCK_STUCK"] = "1"
         result = self.run_tool("update-duo.sh", "--yes")
         self.assertNotEqual(result.returncode, 0)

@@ -59,17 +59,19 @@ duo_refresh() {
 
 duo_version() { "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 
-# True while the app or its Electron helpers run. Helpers in Contents/Helpers
-# are started by other programs (chrome-native-host by Chrome, disclaimer by
-# the claude CLI) and outlive the app; as in the native desktop-idle check
-# (bin/claude-maintenance.h), only executables in a Contents/MacOS count.
-duo_app_running() {
-    local prefix="$1/Contents/" line
-    while IFS= read -r line; do
-        case "$line" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) return 0 ;; esac
-    done < <("$PS" -axo comm=)
-    return 1
+# Prints "PID executable" for the app and its Electron helpers. Helpers in
+# Contents/Helpers are started by other programs (chrome-native-host by
+# Chrome, disclaimer by the claude CLI) and outlive the app; as in the native
+# desktop-idle check (bin/claude-maintenance.h), only executables in a
+# Contents/MacOS count.
+duo_app_processes() {
+    local prefix="$1/Contents/" pid executable
+    while read -r pid executable; do
+        case "$executable" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) printf '%s %s\n' "$pid" "$executable" ;; esac
+    done < <("$PS" -axo pid=,comm=)
 }
+
+duo_app_running() { [ -n "$(duo_app_processes "$1")" ]; }
 
 duo_quit_app() {
     local app="$1" identifier
