@@ -184,7 +184,7 @@ moving a system copy is insufficient to pass verification.
 All mutation workers use the chosen directory and its kernel lock. Locks do
 not span two different app directories using the same profiles; location
 changes require reviewed transition and do not disable old launchers. This
-opt-in supports the [GUI validation plan](GUI_VALIDATION_PT_BR.md) in the user's
+opt-in supports the [GUI validation plan](GUI_VALIDATION.md) in the user's
 existing session without placing the Duo candidate among shared system apps.
 No additional macOS account is requested. The official app still uses its real
 existing profile; the private app destination does not isolate credentials.

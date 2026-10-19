@@ -6,6 +6,7 @@ caller's apps, profiles, launch agents or toolset.
 """
 import os
 from pathlib import Path
+import re
 import plistlib
 import shutil
 import subprocess
@@ -40,6 +41,7 @@ class DuoToolsTests(unittest.TestCase):
         self.home = self.root / "home"
         self.mock = self.root / "mock"
         self.mock.mkdir()
+        self.language = "en"
         (self.home / "Applications").mkdir(parents=True, mode=0o700)
         self.source_app = self.root / "Applications/Claude.app"
         self.duo_app = self.home / "Applications/Claude Duo.app"
@@ -57,7 +59,7 @@ class DuoToolsTests(unittest.TestCase):
         self.config.parent.mkdir(parents=True)
         self.config.write_text("@mode original-copy\n")
         (self.tools / "config-path").write_text(str(self.config) + "\n")
-        for name in ("duo-common.sh", "atualizar-duo.sh", "verificar-atualizacao.sh"):
+        for name in ("duo-common.sh", "update-duo.sh", "check-update.sh"):
             self.install_patched(REPO / "duo" / name, self.tools / name)
         self.env = {"HOME": str(self.home), "USER": "tester", "PATH": "/usr/bin:/bin", "MOCK_DIR": str(self.mock)}
 
@@ -79,7 +81,7 @@ class DuoToolsTests(unittest.TestCase):
                          ("DUO_QUIT_TIMEOUT=60", "DUO_QUIT_TIMEOUT=3"),
                          ('DUO_SOURCE_APP="/Applications/Claude.app"', f'DUO_SOURCE_APP="{self.source_app}"')):
             code = code.replace(old, new)
-        return code
+        return re.sub(r"^DUO_LANGUAGE=.*$", "DUO_LANGUAGE=" + self.language, code, flags=re.M)
 
     def install_patched(self, source, target):
         target.write_text(self.patch(source.read_text()))
@@ -101,22 +103,22 @@ class DuoToolsTests(unittest.TestCase):
         info = plistlib.loads((self.duo_app / "Contents/Info.plist").read_bytes())
         info["CFBundleShortVersionString"] = "2.0.0"
         (self.duo_app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
-        self.assertEqual(self.run_tool("verificar-atualizacao.sh").returncode, 0)
+        self.assertEqual(self.run_tool("check-update.sh").returncode, 0)
         self.assertEqual(self.log("osascript.log"), "")
 
     def test_check_asks_once_a_day_per_version_and_later_does_nothing(self):
-        self.env["MOCK_ANSWER"] = "Depois"
-        self.assertEqual(self.run_tool("verificar-atualizacao.sh").returncode, 0)
+        self.env["MOCK_ANSWER"] = "Later"
+        self.assertEqual(self.run_tool("check-update.sh").returncode, 0)
         self.assertIn("2.0.0", self.log("osascript.log"))
         self.assertIn("1.0.0", self.log("osascript.log"))
         self.assertEqual(self.log("dispatcher.log"), "")
         before = self.log("osascript.log")
-        self.run_tool("verificar-atualizacao.sh")
+        self.run_tool("check-update.sh")
         self.assertEqual(self.log("osascript.log"), before)  # Already asked today.
 
     def test_check_accepting_rebuilds_without_asking_again(self):
-        self.env["MOCK_ANSWER"] = "Atualizar agora"
-        result = self.run_tool("verificar-atualizacao.sh")
+        self.env["MOCK_ANSWER"] = "Update now"
+        result = self.run_tool("check-update.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log("osascript.log").count("display alert"), 1)
         self.assertEqual(self.log("dispatcher.log").splitlines(),
@@ -124,64 +126,91 @@ class DuoToolsTests(unittest.TestCase):
 
     def test_check_does_nothing_when_not_installed(self):
         (self.tools / "config-path").unlink()
-        self.assertEqual(self.run_tool("verificar-atualizacao.sh").returncode, 0)
+        self.assertEqual(self.run_tool("check-update.sh").returncode, 0)
         self.assertEqual(self.log("osascript.log"), "")
 
     # Updater
     def test_cancel_changes_nothing(self):
         self.running(self.source_app)
-        self.env["MOCK_ANSWER"] = "Cancelar"
-        self.assertEqual(self.run_tool("atualizar-duo.sh").returncode, 0)
+        self.env["MOCK_ANSWER"] = "Cancel"
+        self.assertEqual(self.run_tool("update-duo.sh").returncode, 0)
         self.assertNotIn(" to quit", self.log("osascript.log"))
         self.assertEqual(self.log("dispatcher.log"), "")
 
     def test_update_quits_rebuilds_and_reopens_what_was_open(self):
         self.running(self.source_app, self.duo_app)
-        self.env["MOCK_ANSWER"] = "Atualizar agora"
-        result = self.run_tool("atualizar-duo.sh")
+        self.env["MOCK_ANSWER"] = "Update now"
+        result = self.run_tool("update-duo.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log("osascript.log").count(" to quit"), 2)
         self.assertIn("Duo", self.log("dispatcher.log"))
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}", f"-a {self.duo_app}"])
-        self.assertIn("atualizado", self.log("osascript.log"))
+        self.assertIn("updated to", self.log("osascript.log"))
 
     def test_update_reopens_only_apps_that_were_open(self):
         self.running(self.source_app)
-        self.assertEqual(self.run_tool("atualizar-duo.sh", "--yes").returncode, 0)
+        self.assertEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}"])
 
     def test_apps_that_do_not_quit_abort_before_building(self):
         self.running(self.source_app)
         self.env["MOCK_STUCK"] = "1"
-        result = self.run_tool("atualizar-duo.sh", "--yes")
+        result = self.run_tool("update-duo.sh", "--yes")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
-        self.assertIn("Não consegui fechar", self.log("osascript.log"))
+        self.assertIn("Could not quit", self.log("osascript.log"))
 
     def test_build_failure_is_reported_and_claude_reopened(self):
         self.running(self.source_app)
         (self.mock / "dispatch-fail").write_text("1")
-        result = self.run_tool("atualizar-duo.sh", "--yes")
+        result = self.run_tool("update-duo.sh", "--yes")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("falhou", self.log("osascript.log"))
+        self.assertIn("update failed", self.log("osascript.log"))
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}"])
-        logs = list((self.home / "Library/Logs/Claude Duo Updater").glob("atualizar-*.log"))
+        logs = list((self.home / "Library/Logs/Claude Duo Updater").glob("update-*.log"))
         self.assertTrue(any("synthetic build failure" in p.read_text() for p in logs))
 
     def test_config_pointer_outside_the_config_folder_is_refused(self):
         outside = self.root / "evil.conf"
         outside.write_text("@mode original-copy\n")
         (self.tools / "config-path").write_text(str(outside) + "\n")
-        self.assertNotEqual(self.run_tool("atualizar-duo.sh", "--yes").returncode, 0)
+        self.assertNotEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
 
     def test_dialog_text_cannot_break_out_of_applescript_strings(self):
-        self.env["MOCK_ANSWER"] = "Depois"
+        self.env["MOCK_ANSWER"] = "Later"
         info = plistlib.loads((self.source_app / "Contents/Info.plist").read_bytes())
         info["CFBundleShortVersionString"] = '2" & (do shell script "touch PWNED") & "'
         (self.source_app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
-        self.run_tool("verificar-atualizacao.sh")
+        self.run_tool("check-update.sh")
         self.assertIn('2\\" & (do shell script \\"touch PWNED\\") & \\"', self.log("osascript.log"))
+
+    def test_dialogs_follow_a_portuguese_macos_language(self):
+        self.language = "pt-BR"
+        for name in ("duo-common.sh", "update-duo.sh", "check-update.sh"):
+            self.install_patched(REPO / "duo" / name, self.tools / name)
+        self.env["MOCK_ANSWER"] = "Atualizar agora"  # The Portuguese button label.
+        result = self.run_tool("check-update.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.log("osascript.log")
+        self.assertIn("O Claude foi atualizado para 2.0.0", log)
+        self.assertIn('"Depois"', log)
+        self.assertIn("claude-apps-refresh.sh Duo", self.log("dispatcher.log"))
+        self.assertIn("Claude Duo atualizado para", self.log("osascript.log"))
+
+    def test_installer_removes_the_earlier_portuguese_named_updater(self):
+        installer = self.installer_fixture()
+        legacy = self.home / "Applications/Atualizar Claude Duo.app"
+        (legacy / "Contents").mkdir(parents=True)
+        self.tools.mkdir(parents=True)
+        for name in ("atualizar-duo.sh", "verificar-atualizacao.sh"):
+            (self.tools / name).write_text("old\n")
+        result = self.run_installer(installer, "--no-build", "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(legacy.exists())
+        self.assertFalse((self.tools / "atualizar-duo.sh").exists())
+        self.assertFalse((self.tools / "verificar-atualizacao.sh").exists())
+        self.assertTrue((self.home / "Applications/Update Claude Duo.app").exists())
 
     # Installer
     def installer_fixture(self):
@@ -189,19 +218,19 @@ class DuoToolsTests(unittest.TestCase):
         (checkout / "duo").mkdir(parents=True)
         (checkout / "scripts").mkdir()
         shutil.copyfile(REPO / "scripts/share-code-profile.py", checkout / "scripts/share-code-profile.py")
-        for name in ("duo-common.sh", "atualizar-duo.sh", "verificar-atualizacao.sh"):
+        for name in ("duo-common.sh", "update-duo.sh", "check-update.sh"):
             self.install_patched(REPO / "duo" / name, checkout / "duo" / name)
-        code = self.patch((REPO / "duo/instalar-duo.sh").read_text())
+        code = self.patch((REPO / "duo/install-duo.sh").read_text())
         code = code.replace("LAUNCHCTL=/bin/launchctl", f"LAUNCHCTL={self.mock}/launchctl")
         code = code.replace('/usr/bin/python3 -I "$REPO/scripts/prepare-toolset.py" "$work/package"', f"{self.mock}/prepare")
         code = code.replace('/bin/bash -p "$REPO/bin/claude-toolset.sh" install', f"{self.mock}/toolset install")
-        (checkout / "duo/instalar-duo.sh").write_text(code)
+        (checkout / "duo/install-duo.sh").write_text(code)
         self.write_mock(self.mock / "launchctl", '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/launchctl.log"\n')
         self.write_mock(self.mock / "prepare", '#!/bin/bash\necho ' + "a" * 64 + '\n')
         self.write_mock(self.mock / "toolset", f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{self.mock}/toolset.log"\n')
         shutil.rmtree(self.tools)
         self.config.unlink()
-        return checkout / "duo/instalar-duo.sh"
+        return checkout / "duo/install-duo.sh"
 
     def run_installer(self, installer, *args):
         return subprocess.run(["/bin/bash", "-p", str(installer), *args], env=self.env,
@@ -216,14 +245,14 @@ class DuoToolsTests(unittest.TestCase):
         self.assertIn("Duo | io.github.tester.claude-duo |", config.read_text())
         self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.tools / "config-path").read_text().strip(), str(config))
-        for name in ("duo-common.sh", "atualizar-duo.sh", "verificar-atualizacao.sh", "share-code-profile.py"):
+        for name in ("duo-common.sh", "update-duo.sh", "check-update.sh", "share-code-profile.py"):
             self.assertEqual((self.tools / name).stat().st_mode & 0o777, 0o700, name)
         self.assertIn("install", self.log("toolset.log"))
-        applet = self.home / "Applications/Atualizar Claude Duo.app"
+        applet = self.home / "Applications/Update Claude Duo.app"
         self.assertTrue((applet / "Contents/Info.plist").exists())
         agent = self.home / "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist"
         data = plistlib.loads(agent.read_bytes())
-        self.assertEqual(data["ProgramArguments"], ["/bin/bash", "-p", str(self.tools / "verificar-atualizacao.sh")])
+        self.assertEqual(data["ProgramArguments"], ["/bin/bash", "-p", str(self.tools / "check-update.sh")])
         self.assertEqual(data["StartInterval"], 3600)
         self.assertIn("bootstrap", self.log("launchctl.log"))
         self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 0)  # --no-build
@@ -257,7 +286,7 @@ class DuoToolsTests(unittest.TestCase):
         shutil.rmtree(self.source_app)
         missing = self.run_installer(installer, "--no-build", "--no-auto-check")
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("Claude oficial", missing.stderr)
+        self.assertIn("official Claude", missing.stderr)
         self.assertEqual(self.log("toolset.log"), "")
 
 

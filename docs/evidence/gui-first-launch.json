@@ -59,8 +59,8 @@
     }
   },
   "gui_results": {
-    "G01": {"result": "INCONCLUSIVO", "blocked_by": "KC01"},
-    "G11": {"result": "INCONCLUSIVO", "blocked_by": "KC01"},
+    "G01": {"result": "INCONCLUSIVE", "blocked_by": "KC01"},
+    "G11": {"result": "INCONCLUSIVE", "blocked_by": "KC01"},
     "remaining_cases": "NAO_EXECUTADO"
   },
   "release_gate": {

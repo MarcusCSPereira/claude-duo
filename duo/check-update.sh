@@ -16,6 +16,7 @@ previous=""
 [ "$previous" != "$source_version $today" ] || exit 0
 printf '%s %s\n' "$source_version" "$today" > "$state"
 
-answer="$(duo_ask "O Claude foi atualizado para $source_version e o Claude Duo está na $duo_version_now. Para atualizar o Duo, os dois apps serão fechados e reabertos." "Atualizar agora" "Depois")"
-[ "$answer" = "Atualizar agora" ] || exit 0
-exec /bin/bash -p "$DUO_HOME/atualizar-duo.sh" --yes
+update_now="$(duo_t "Update now" "Atualizar agora")"
+answer="$(duo_ask "$(duo_t "Claude was updated to $source_version and Claude Duo is on $duo_version_now. Updating the Duo quits and reopens both apps." "O Claude foi atualizado para $source_version e o Claude Duo está na $duo_version_now. Para atualizar o Duo, os dois apps serão fechados e reabertos.")" "$update_now" "$(duo_t "Later" "Depois")")"
+[ "$answer" = "$update_now" ] || exit 0
+exec /bin/bash -p "$DUO_HOME/update-duo.sh" --yes

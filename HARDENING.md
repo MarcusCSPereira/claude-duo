@@ -4,7 +4,7 @@
 existing `Claude Safe Storage` Keychain entry. The user denied it; no
 account was connected. Separate data directories and bundle IDs have not
 established credential independence. See the
-[first-launch finding](docs/KEYCHAIN_FIRST_LAUNCH_PT_BR.md). Do not approve
+[first-launch finding](docs/KEYCHAIN_FIRST_LAUNCH.md). Do not approve
 daily two-account use from the maintenance tests alone.
 
 This revision supports the existing graphical workflow: open the Personal or
@@ -42,7 +42,7 @@ person using Claude to interact with the Claude Code CLI.
   recognized as the desktop client by claude.ai. The rewrite keeps the archive the same size and reseals
   only that member's digests and the header hash. The integrity record
   regenerates the expected archive from the source and requires byte
-  equality. See [the namespace notes](docs/KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md).
+  equality. See [the namespace notes](docs/KEYCHAIN_NAMESPACE_EXPERIMENTS.md).
 - Build and verify in a private directory on the destination volume. Publish
   with native `RENAME_SWAP` for a replacement or `RENAME_EXCL` for a first
   install, using directory descriptors and no-follow flags. There is no
@@ -126,7 +126,7 @@ No directive preserves that default. Changing location is not migration: old
 apps/launchers remain and must not share profiles with the new copy. Maintenance
 locks are per selected app directory, not cross-directory profile locks. Use one
 reviewed configuration/location per deployment. See the
-[GUI validation plan](docs/GUI_VALIDATION_PT_BR.md).
+[GUI validation plan](docs/GUI_VALIDATION.md).
 
 Custom providers, API credentials, endpoint overrides and proxy overrides are
 unsupported in this subscription mode. A required inherited proxy causes a

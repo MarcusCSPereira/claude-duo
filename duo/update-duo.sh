@@ -6,18 +6,19 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/duo-common.sh" || exit 
 set -u
 
 ask=yes
-case "${1:-}" in --yes) ask=no ;; '') ;; *) duo_error 'usage: atualizar-duo.sh [--yes]'; exit 2 ;; esac
+case "${1:-}" in --yes) ask=no ;; '') ;; *) duo_error 'usage: update-duo.sh [--yes]'; exit 2 ;; esac
 /bin/mkdir -p "$DUO_LOG_DIR" || exit 1
-LOG="$DUO_LOG_DIR/atualizar-$(/bin/date +%Y%m%d-%H%M%S).log"
+LOG="$DUO_LOG_DIR/update-$(/bin/date +%Y%m%d-%H%M%S).log"
 log() { printf '%s\n' "$*" >> "$LOG"; }
 
 if ! duo_config >/dev/null 2>>"$LOG"; then
-    duo_notify "Claude Duo" "O Claude Duo não está instalado. Rode o instalar-duo.sh."
+    duo_notify "Claude Duo" "$(duo_t "Claude Duo is not installed. Run duo/install-duo.sh." "O Claude Duo não está instalado. Rode o duo/install-duo.sh.")"
     exit 1
 fi
 if [ "$ask" = yes ]; then
-    answer="$(duo_ask "Para atualizar o Claude Duo, o Claude e o Claude Duo serão fechados e reabertos no fim. Salve o que estiver fazendo." "Atualizar agora" "Cancelar")"
-    [ "$answer" = "Atualizar agora" ] || { log "cancelled"; exit 0; }
+    update_now="$(duo_t "Update now" "Atualizar agora")"
+    answer="$(duo_ask "$(duo_t "To update Claude Duo, Claude and Claude Duo will quit and reopen at the end. Save your work first." "Para atualizar o Claude Duo, o Claude e o Claude Duo serão fechados e reabertos no fim. Salve o que estiver fazendo.")" "$update_now" "$(duo_t "Cancel" "Cancelar")")"
+    [ "$answer" = "$update_now" ] || { log "cancelled"; exit 0; }
 fi
 
 claude_open=no; duo_open=no
@@ -30,10 +31,10 @@ reopen() {
 
 if ! duo_quit_both; then
     log "apps did not quit within ${DUO_QUIT_TIMEOUT}s"
-    duo_notify "Claude Duo" "Não consegui fechar o Claude e o Claude Duo. Feche os dois e tente de novo."
+    duo_notify "Claude Duo" "$(duo_t "Could not quit Claude and Claude Duo. Quit both and try again." "Não consegui fechar o Claude e o Claude Duo. Feche os dois e tente de novo.")"
     exit 1
 fi
-duo_notify "Claude Duo" "Atualizando o Claude Duo… leva cerca de um minuto."
+duo_notify "Claude Duo" "$(duo_t "Updating Claude Duo… this takes about a minute." "Atualizando o Claude Duo… leva cerca de um minuto.")"
 log "== $(/bin/date) source $(duo_version "$DUO_SOURCE_APP") duo $(duo_version "$DUO_APP" || echo none)"
 
 status=0
@@ -46,9 +47,10 @@ fi
 reopen
 if [ "$status" -eq 0 ]; then
     log "OK"
-    duo_notify "Claude Duo" "Claude Duo atualizado para $(duo_version "$DUO_APP") e verificado."
+    version="$(duo_version "$DUO_APP")"
+    duo_notify "Claude Duo" "$(duo_t "Claude Duo updated to $version and verified." "Claude Duo atualizado para $version e verificado.")"
 else
     log "FAILED ($status)"
-    duo_notify "Claude Duo" "A atualização falhou; o Claude Duo anterior foi mantido. Log: $LOG"
+    duo_notify "Claude Duo" "$(duo_t "The update failed; the previous Claude Duo was kept. Log: $LOG" "A atualização falhou; o Claude Duo anterior foi mantido. Log: $LOG")"
 fi
 exit "$status"

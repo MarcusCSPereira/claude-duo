@@ -1,6 +1,6 @@
 # Residual limitations and improvement proposal
 
-The [current execution roadmap in Portuguese](ROADMAP_PT_BR.md) supersedes the
+The [current execution roadmap](ROADMAP.md) supersedes the
 historical delivery order below. It reflects the security-first scope, defers
 the new native GUI prototype, and separates fixture evidence from the pending
 two-account graphical release gate. The numbered review remains the historical

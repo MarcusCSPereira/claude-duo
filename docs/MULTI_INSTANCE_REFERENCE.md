@@ -1,7 +1,7 @@
-> **Referência técnica do projeto original.** Este é o README do
-> [multi-claude-desktop](https://github.com/cgclark/multi-claude-desktop), de
-> Christopher Clark, com o endurecimento feito neste repositório. Para instalar e
-> usar o Claude Duo, veja o [README principal](../README.md).
+> **Technical reference from the original project.** This is the README of
+> [multi-claude-desktop](https://github.com/cgclark/multi-claude-desktop) by
+> Christopher Clark, with the hardening added in this repository. To install and
+> use Claude Duo, see the [main README](../README.md).
 
 # Multiple Claude Desktop Instances (macOS)
 
@@ -12,15 +12,15 @@ that remain. Copy the shared `claude-instances-common.sh` with the other scripts
 The [deeper limitation review and roadmap](LIMITATIONS_AND_ROADMAP.md)
 includes controlled evidence and the proposed GUI launch architecture; it does
 not claim that all remaining limitations have been fixed.
-The [current execution roadmap in Portuguese](ROADMAP_PT_BR.md) lists the
+The [current execution roadmap](ROADMAP.md) lists the
 remaining work, release criteria and the steps that need account login. The
 hardened branch is still experimental; graphical two-account Code behavior has
 not been validated.
 **The first live Duo launch is blocked:** it requested access to the existing
 `Claude Safe Storage` Keychain entry; the user denied access before signing in.
-See the [finding and resumption criteria](KEYCHAIN_FIRST_LAUNCH_PT_BR.md).
+See the [finding and resumption criteria](KEYCHAIN_FIRST_LAUNCH.md).
 The current candidate is not approved for daily two-account use.
-Two [namespace experiments](KEYCHAIN_NAMESPACE_EXPERIMENTS_PT_BR.md) now
+Two [namespace experiments](KEYCHAIN_NAMESPACE_EXPERIMENTS.md) now
 distinguish a failed bundle/helper rename from a product-name prototype that
 opened without permission prompts and had a distinct named Keychain item.
 The latter still needs Desktop-flow validation and production integration;
@@ -33,11 +33,11 @@ does not change an existing installation or disable legacy copies.
 The copy is named **Claude Duo**. The [versioned tool installer](TOOLSET_INSTALLATION.md)
 now stages/verifies complete pinned toolsets and activates them atomically;
 it does not migrate or rename existing apps or profiles.
-The [graphical validation plan](GUI_VALIDATION_PT_BR.md) uses the existing
+The [graphical validation plan](GUI_VALIDATION.md) uses the existing
 macOS session, new Duo data directories and an opt-in private `~/Applications`
 destination. No additional macOS user is requested. The original's existing
 profile participates in GUI testing; new Duo directories are not OS isolation.
-The [configuration reuse proposal](PROFILE_REUSE_PT_BR.md) covers importing
+The [configuration reuse proposal](PROFILE_REUSE.md) covers importing
 preferences, MCP definitions and plugin selections while keeping authentication
 separate; the importer is not implemented yet.
 
@@ -553,7 +553,7 @@ For each instance, `claude-apps-refresh.sh`:
 |---|---|
 | `cp -Rc` (clone) | ~2 MB instead of 823 MB per instance |
 | Re-sign **only** main binary + outer bundle | The binary's signature seals `Info.plist`, which we edit, so it must be re-signed. Re-signing the 381 MB Electron Framework rewrites it and destroys the clone. Mixed signatures load fine because we sign **without** hardened runtime, so library validation (which demands matching Team IDs) is off |
-| `CFBundleName` stays `"Claude"` | Electron uses it to locate the existing helper apps. It also influences the macOS Safe Storage service name: the first live Duo launch requested the existing `Claude Safe Storage` entry. Changing this field alone is not a validated fix. See the [blocked GUI finding](KEYCHAIN_FIRST_LAUNCH_PT_BR.md) |
+| `CFBundleName` stays `"Claude"` | Electron uses it to locate the existing helper apps. It also influences the macOS Safe Storage service name: the first live Duo launch requested the existing `Claude Safe Storage` entry. Changing this field alone is not a validated fix. See the [blocked GUI finding](KEYCHAIN_FIRST_LAUNCH.md) |
 | Delete `CFBundleIconName` | Points into `Assets.car` (Claude's own icon) and **outranks** `CFBundleIconFile`. Leave it and the orange icon comes back |
 | Delete `CFBundleURLTypes` | Stops copies fighting over `claude://` and `msauth://` links |
 | `arch -arm64` in the launcher | **Critical** — see below |

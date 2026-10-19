@@ -19,6 +19,12 @@ DUO_APP="$HOME/Applications/Claude Duo.app"
 DUO_SOURCE_APP="/Applications/Claude.app"
 DUO_DISPATCHER="$HOME/.local/share/claude-instances/toolsets/dispatcher"
 DUO_QUIT_TIMEOUT=60
+# Dialogs and notifications follow the macOS language: Portuguese when the
+# first preferred language is Portuguese, English otherwise.
+DUO_LANGUAGE="$(/usr/bin/defaults read -g AppleLanguages 2>/dev/null | /usr/bin/awk -F'"' 'NF>1{print $2; exit}')"
+
+# duo_t ENGLISH PORTUGUESE
+duo_t() { case "$DUO_LANGUAGE" in pt*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 
 duo_error() { printf 'claude-duo: %s\n' "$*" >&2; }
 
@@ -37,7 +43,7 @@ duo_ask() {
 
 duo_config() {
     local path
-    [ -f "$DUO_CONFIG_POINTER" ] && [ ! -L "$DUO_CONFIG_POINTER" ] || { duo_error 'Claude Duo is not installed (run instalar-duo.sh)'; return 1; }
+    [ -f "$DUO_CONFIG_POINTER" ] && [ ! -L "$DUO_CONFIG_POINTER" ] || { duo_error 'Claude Duo is not installed (run duo/install-duo.sh)'; return 1; }
     IFS= read -r path < "$DUO_CONFIG_POINTER" || true
     case "$path" in "$HOME"/.config/claude-instances/*.conf) ;; *) duo_error 'unexpected config location'; return 1 ;; esac
     [ -f "$path" ] && [ ! -L "$path" ] || { duo_error "missing config: $path"; return 1; }
