@@ -56,6 +56,9 @@ SCHEME = "claude-dev"
 UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 PROMPT_LIMIT = 4000  # A link is visible in process listings; long briefs go through `send`.
+# What the Duo's claude says before any work when its own setup is missing (see "Before the first send").
+SIGNED_OUT = re.compile(r"not logged in|please run /login", re.IGNORECASE)
+UNTRUSTED = re.compile(r"workspace not trusted", re.IGNORECASE)
 
 ROLE_SYNC = """\
 You are running on the Claude Duo account, the second Claude Code account of this Mac. The original account
@@ -151,21 +154,35 @@ def check_options(task, *, model, name, session, cost_max):
         raise Refused("--max-cost must be above zero")
 
 
-def follow_up(acct, command, target=None):
-    """The command line that reaches the Duo's session list from the user's terminal."""
-    prefix = f"CLAUDE_CONFIG_DIR={shlex.quote(str(acct['folder']))} claude {command}"
+def follow_up(acct, command=None, target=None):
+    """The command line that reaches the Duo's account from the user's terminal."""
+    prefix = f"CLAUDE_CONFIG_DIR={shlex.quote(str(acct['folder']))} claude" + (f" {command}" if command else "")
     return f"{prefix} {shlex.quote(target)}" if target else prefix
 
 
+def hint(acct, where, error):
+    """The one-time fix, as commands for the user's Terminal, when the Duo's claude refused for its setup."""
+    if SIGNED_OUT.search(error or ""):
+        return (f"the Duo's claude command is not signed in (the Duo app signs in only its own sessions). Once, "
+                f"from Terminal: `{follow_up(acct)}`, /login with the Duo's account, then check with "
+                f"`{follow_up(acct, 'auth status')}`")
+    if UNTRUSTED.search(error or ""):
+        return (f"the Duo's account does not trust {where} yet. Once, from Terminal: "
+                f"`cd {shlex.quote(str(where))} && {follow_up(acct)}` and accept the trust prompt, "
+                "or open the folder in the Duo's Code tab")
+    return None
+
+
 def send_sync(task, *, folder=None, model=None, permission="auto", cost_max=None, session=None, say=print):
-    """One `claude -p` turn on the Duo's account; returns {ok, session, cost_usd, answer, error}."""
+    """One `claude -p` turn on the Duo's account; returns {ok, session, cost_usd, answer, error, hint}."""
     check_options(task, model=model, name=None, session=session, cost_max=cost_max)
     acct, where = duo(), repository(folder)
     extra = ["--max-budget-usd", f"{cost_max:.2f}"] if cost_max is not None else []
     end = loop.converse(acct, session, task, folder=where, role_prompt=ROLE_SYNC, reviewer=False, model=model,
                         permission=permission, extra=extra,
                         on_tool=lambda tool, data: say(f"  · duo {tool}: {loop.tool_summary(tool, data)}"))
-    return {"mode": "sync", "account": "duo", "repo": str(where), **end}
+    return {"mode": "sync", "account": "duo", "repo": str(where), **end,
+            "hint": None if end["ok"] else hint(acct, where, end["error"])}
 
 
 def send_background(task, *, folder=None, model=None, permission="auto", name=None, session=None):
@@ -180,10 +197,11 @@ def send_background(task, *, folder=None, model=None, permission="auto", name=No
     output = (started.stdout or "") + (started.stderr or "")
     found = BACKGROUND_ID.search(output)
     if started.returncode != 0 or not found:
+        error = output.strip()[-400:] or f"exited with code {started.returncode}"
         return {"mode": "bg", "account": "duo", "repo": str(where), "ok": False, "id": None,
-                "error": output.strip()[-400:] or f"exited with code {started.returncode}"}
+                "error": error, "hint": hint(acct, where, error)}
     agent_id = found.group(1)
-    return {"mode": "bg", "account": "duo", "repo": str(where), "ok": True, "id": agent_id, "error": None,
+    return {"mode": "bg", "account": "duo", "repo": str(where), "ok": True, "id": agent_id, "error": None, "hint": None,
             "commands": {verb: follow_up(acct, verb, None if verb == "agents" else agent_id) for verb in FOLLOW_UP}}
 
 
@@ -281,6 +299,8 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif not result["ok"]:
         print(f"duo-send: the Duo account did not answer: {result['error']}", file=sys.stderr)
+        if result.get("hint"):
+            print(f"duo-send: {result['hint']}", file=sys.stderr)
     elif result["mode"] == "bg":
         print(f"started on the Duo account · {result['id']} · {result['repo']}")
         for verb in FOLLOW_UP:

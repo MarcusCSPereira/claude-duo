@@ -53,7 +53,9 @@ which needs two things of its own. Seen with Claude Code 2.1.303.
    and accept the trust prompt.
 
 If the Duo line of the config sets another `CLAUDE_CONFIG_DIR`, use that
-folder instead of `~/.claude-duo`.
+folder instead of `~/.claude-duo`. When a send fails for one of these two
+reasons, `duo-send.py` prints these commands with the right folders; `--json`
+puts them in `hint`.
 
 ## Two modes
 
@@ -67,7 +69,7 @@ folder instead of `~/.claude-duo`.
 
 - **Synchronous** works like a subagent on the other account: the original
   session calls it and reads the answer as the tool result. `--json` returns
-  `{ok, session, cost_usd, answer, error}`. To continue the same Duo session,
+  `{ok, session, cost_usd, answer, error, hint}`. To continue the same Duo session,
   pass `--resume <session>`.
 - **`--bg`** opens a background session that the Duo's `claude agents` lists.
   It does not appear in the original's list: background sessions belong to

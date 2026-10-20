@@ -39,11 +39,15 @@ elif "--bg" in args:
     if mode == "fail":
         print("error: not logged in", file=sys.stderr)
         sys.exit(1)
+    if mode == "untrusted":  # claude 2.1.303 in a folder the account never trusted
+        print(f"Workspace not trusted. Run `claude` in {os.getcwd()} once and accept the trust prompt", file=sys.stderr)
+        sys.exit(1)
     print("backgrounded · 4a79120f\n  claude agents             list sessions")
 else:
     session = args[args.index("--resume") + 1] if "--resume" in args else "sess-duo-0001"
-    ok = mode != "fail"
-    text = "Done: read the README." if ok else "Exceeded USD budget"
+    ok = mode == "ok"
+    # signed_out: what claude -p answers, at cost 0 and exit 1, when the account's CLI never signed in.
+    text = {"ok": "Done: read the README.", "signed_out": "Not logged in · Please run /login"}.get(mode, "Exceeded USD budget")
     for event in [
         {"type": "system", "subtype": "init", "session_id": session},
         {"type": "assistant", "message": {"id": "m1", "content": [
@@ -88,8 +92,8 @@ class DuoSendTests(unittest.TestCase):
     def test_sync_runs_on_the_duo_account_in_the_repo_and_returns_the_answer(self):
         process, end = self.send_json("read the README", "--repo", str(self.repo))
         self.assertEqual(process.returncode, 0, process.stderr)
-        self.assertEqual((end["ok"], end["mode"], end["answer"], end["session"]),
-                         (True, "sync", "Done: read the README.", "sess-duo-0001"))
+        self.assertEqual((end["ok"], end["mode"], end["answer"], end["session"], end["hint"]),
+                         (True, "sync", "Done: read the README.", "sess-duo-0001", None))
         self.assertAlmostEqual(end["cost_usd"], 0.02)
         [call] = self.calls()
         self.assertEqual(call["folder"], str(self.home / ".claude-duo"))
@@ -123,6 +127,25 @@ class DuoSendTests(unittest.TestCase):
         self.assertEqual(process.returncode, 1)
         self.assertFalse(end["ok"])
         self.assertIn("budget", end["error"])
+        self.assertIsNone(end["hint"])
+
+    def test_a_signed_out_duo_cli_gets_the_command_that_signs_it_in(self):
+        duo = self.home / ".claude-duo"
+        process, end = self.send_json("task", "--repo", str(self.repo), FAKE_MODE="signed_out")
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("Not logged in", end["error"])
+        self.assertIn(f"`CLAUDE_CONFIG_DIR={duo} claude`, /login", end["hint"])
+        self.assertIn(f"`CLAUDE_CONFIG_DIR={duo} claude auth status`", end["hint"])
+        plain = self.send("send", "task", "--repo", str(self.repo), FAKE_MODE="signed_out")
+        self.assertEqual(plain.returncode, 1)
+        self.assertIn(f"duo-send: {end['hint']}", plain.stderr)
+
+    def test_bg_in_an_untrusted_folder_gets_the_command_that_trusts_it(self):
+        process, end = self.send_json("task", "--repo", str(self.repo), "--bg", FAKE_MODE="untrusted")
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("Workspace not trusted", end["error"])
+        self.assertIn(f"`cd {self.repo} && CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude`", end["hint"])
+        self.assertIn("trust prompt", end["hint"])
 
     def test_bg_starts_a_background_session_on_the_duo_account(self):
         process, end = self.send_json("refactor the parser", "--repo", str(self.repo), "--bg", "--name", "parser")

@@ -31,8 +31,11 @@ TASK
 ```
 
 - Prefer `-` with a quoted heredoc: quotes and backticks need no escaping.
-- `--json` returns `{ok, session, cost_usd, answer, error}`. Relay `answer` to
-  the user; on `ok: false`, show `error`.
+- `--json` returns `{ok, session, cost_usd, answer, error, hint}`. Relay
+  `answer` to the user; on `ok: false`, show `error`. A `hint` is the one-time
+  setup the Duo's `claude` still needs (its own login, or trusting the folder):
+  give the user its commands to run in Terminal; they are interactive, so do
+  not run them yourself.
 - Nobody can answer the Duo during this turn: when it needs a decision, it
   says what is missing in its answer. Ask the user, then continue the same
   session with `--resume <session>`.
@@ -53,6 +56,7 @@ TASK
   answer questions), `duo-send.py logs <id>`, `duo-send.py stop <id>`. The
   original account's `claude agents` does not list it.
 - `--max-cost` does not work with `--bg`.
+- On `ok: false`, show `error` and pass on `hint` as in the synchronous mode.
 
 ## On the Duo's screen
 
