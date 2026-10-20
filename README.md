@@ -124,8 +124,11 @@ account, in a repository you name:
   the Duo's sessions, which the original's `claude agents` does not list.
 - **Same isolation as loop-duo:** the Duo's account, environment and
   `claude -p` turn come from `loop-duo.py`. `bypassPermissions` is refused.
-- **From the original Claude:** link the skill with
-  `ln -s ~/claude-duo/duo/skills/duo-send ~/.claude/skills/duo-send`.
+- **From the original Claude:** `install-duo.sh` installs the script in
+  `~/.local/share/claude-duo` and the `duo-send` skill in
+  `~/.claude/skills`, so you can just ask the original Claude to send work to
+  the Duo. It never replaces a `duo-send` skill of your own; `--no-skill`
+  skips it, and `uninstall-duo.sh` removes it.
 
 - **On the Duo's screen:** after `duo/install-duo.sh --links` (it adds
   `@links claude-dev` to the config and rebuilds), `duo-send.py open --repo … --prompt "…"`

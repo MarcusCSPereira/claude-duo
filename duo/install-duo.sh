@@ -8,6 +8,7 @@
 #   --no-build        prepare everything but do not build the Duo now
 #   --links           let the Duo take claude-dev:// links (duo-send.py open):
 #                     adds `@links claude-dev` to the config before building
+#   --no-skill        do not give the original Claude the duo-send skill
 DUO_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 source "$DUO_TOOLS/duo-common.sh" || exit 1
 set -u
@@ -20,12 +21,13 @@ AGENT="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 UPDATER_APP="$HOME/Applications/Update Claude Duo.app"
 LEGACY_UPDATER_APP="$HOME/Applications/Atualizar Claude Duo.app"
 
-auto_check=yes; build=yes; links=no
+auto_check=yes; build=yes; links=no; skill=yes
 for arg in "$@"; do
     case "$arg" in
         --no-auto-check) auto_check=no ;;
         --no-build) build=no ;;
         --links) links=yes ;;
+        --no-skill) skill=no ;;
         *) duo_error "unknown option: $arg"; exit 2 ;;
     esac
 done
@@ -86,6 +88,10 @@ for file in duo-common.sh update-duo.sh check-update.sh; do
     /usr/bin/install -m 700 "$DUO_TOOLS/$file" "$DUO_HOME/$file" || exit 1
 done
 /usr/bin/install -m 700 "$REPO/scripts/share-code-profile.py" "$DUO_HOME/share-code-profile.py" || exit 1
+# duo-send imports loop-duo from its own folder; the skill calls this copy.
+for file in duo-send.py loop-duo.py; do
+    /usr/bin/install -m 700 "$DUO_TOOLS/$file" "$DUO_HOME/$file" || exit 1
+done
 # Earlier releases used Portuguese names; remove them so only one updater exists.
 /bin/rm -rf "$LEGACY_UPDATER_APP"
 /bin/rm -f "$DUO_HOME/atualizar-duo.sh" "$DUO_HOME/verificar-atualizacao.sh"
@@ -93,6 +99,21 @@ script="do shell script \"/bin/bash -p \" & quoted form of \"$(duo_as_text "$DUO
 /bin/rm -rf "$UPDATER_APP"
 "$OSACOMPILE" -o "$UPDATER_APP" -e "$script" || fail 'could not create the Update Claude Duo app'
 echo "App: $UPDATER_APP"
+
+if [ "$skill" = yes ]; then
+    step "duo-send skill for the original Claude"
+    skill_dir="$HOME/.claude/skills/duo-send"
+    skill_mark='<!-- claude-duo: installed by duo/install-duo.sh, which updates it; uninstall-duo.sh removes it -->'
+    if [ ! -d "$HOME/.claude" ] || [ -L "$HOME/.claude" ]; then
+        echo "Skipped: the original Claude has no Code folder (~/.claude) yet; run this again after opening Code once."
+    elif [ -L "$skill_dir" ] || { [ -e "$skill_dir" ] && ! /usr/bin/grep -qxF "$skill_mark" "$skill_dir/SKILL.md" 2>/dev/null; }; then
+        echo "Kept $skill_dir: it was not installed by Claude Duo."
+    else
+        /bin/mkdir -p "$skill_dir" || exit 1
+        /usr/bin/install -m 644 "$DUO_TOOLS/skills/duo-send/SKILL.md" "$skill_dir/SKILL.md" || exit 1
+        echo "Skill: $skill_dir (ask the original Claude to send work to the Duo)"
+    fi
+fi
 
 if [ "$auto_check" = yes ]; then
     step "Update prompt when Claude updates"

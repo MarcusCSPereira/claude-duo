@@ -82,6 +82,11 @@ if [ -f "$config" ] && [ ! -L "$config" ]; then
 fi
 
 items=("$DUO_APP" "$UPDATER_APP" "$LEGACY_UPDATER_APP" "$AGENT" "$DUO_HOME" "$config" "$DUO_LOG_DIR")
+# The duo-send skill, only the copy the installer put there (never a symlink or the user's own).
+skill_dir="$HOME/.claude/skills/duo-send"
+if [ -d "$skill_dir" ] && [ ! -L "$skill_dir" ] && /usr/bin/grep -qxF '<!-- claude-duo: installed by duo/install-duo.sh, which updates it; uninstall-duo.sh removes it -->' "$skill_dir/SKILL.md" 2>/dev/null; then
+    items+=("$skill_dir")
+fi
 if [ "$others" = no ]; then
     items+=("$TOOLSET")
     for txn in "$HOME/Applications"/.claude-txn.*; do items+=("$txn"); done

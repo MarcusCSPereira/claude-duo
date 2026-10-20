@@ -6,9 +6,10 @@ description: Hands a task to the Claude Duo account (the second Claude Code acco
 # duo-send
 
 `duo-send.py` runs Claude Code on the Duo's account, in the repository you
-name. The script lives two folders above this file once the symlink is
-resolved; in the standard install it is `~/claude-duo/duo/duo-send.py`. Always
-run it with `/usr/bin/python3 -I`.
+name. `duo/install-duo.sh` installs it at `~/.local/share/claude-duo/duo-send.py`
+(with `loop-duo.py` next to it) and this skill at `~/.claude/skills/duo-send`.
+Always run it with `/usr/bin/python3 -I`. If the file is missing, tell the user
+to run `duo/install-duo.sh` again from an up-to-date checkout.
 
 ## Before sending
 
@@ -24,7 +25,7 @@ run it with `/usr/bin/python3 -I`.
 ## Synchronous: wait for the answer
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send - --repo /path/to/repo --json --max-cost 2 <<'TASK'
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py send - --repo /path/to/repo --json --max-cost 2 <<'TASK'
 <the brief>
 TASK
 ```
@@ -41,7 +42,7 @@ TASK
 ## Background: a session the user follows
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send - --repo /path/to/repo --bg --name "short name" --json <<'TASK'
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py send - --repo /path/to/repo --bg --name "short name" --json <<'TASK'
 <the brief>
 TASK
 ```
@@ -58,8 +59,8 @@ TASK
 When the user wants to see or drive the session in the Claude Duo window:
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py open --repo /path/to/repo --prompt "short prompt"
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send - --repo /path/to/repo --open --json <<'TASK'
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py open --repo /path/to/repo --prompt "short prompt"
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py send - --repo /path/to/repo --open --json <<'TASK'
 <the brief>
 TASK
 ```
@@ -77,3 +78,5 @@ TASK
 - Do not pass `--permission bypassPermissions` (it is refused anyway).
 - Do not send credentials, tokens or secrets in the task.
 - Do not ask the Duo to merge, push to the default branch or change settings.
+
+<!-- claude-duo: installed by duo/install-duo.sh, which updates it; uninstall-duo.sh removes it -->
