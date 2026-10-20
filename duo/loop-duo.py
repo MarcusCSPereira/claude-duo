@@ -188,13 +188,16 @@ def gh_bin():
     return found
 
 
-def converse(acct, session, text, *, folder, role_prompt, reviewer, model, permission, on_tool):
-    """One turn of `acct` in `folder`: continues `session` (or starts one) and returns its result."""
+def converse(acct, session, text, *, folder, role_prompt, reviewer, model, permission, on_tool, extra=()):
+    """One turn of `acct` in `folder`: continues `session` (or starts one) and returns its result.
+
+    `extra` goes before the output flags; duo-send uses it for --max-budget-usd.
+    """
     if session is not None and not SESSION_ID.match(session):
         raise Refused(f"invalid session id: {session!r}")
     argv = [claude_bin(), "-p", *(["--resume", session] if session else []), *(["--model", model] if model else []),
             "--permission-mode", permission, "--append-system-prompt", role_prompt,
-            *(["--disallowedTools", *NO_EDIT_TOOLS] if reviewer else []),
+            *(["--disallowedTools", *NO_EDIT_TOOLS] if reviewer else []), *extra,
             "--output-format", "stream-json", "--verbose"]
     errors = tempfile.TemporaryFile(mode="w+", encoding="utf-8")  # a file: a full stderr pipe would block
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True,
