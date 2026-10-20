@@ -4,8 +4,19 @@
 #include <libproc.h>
 #include <sys/proc.h>
 #include <pwd.h>
+#include <sys/sysctl.h>
 
 static bool maintenance_gone(pid_t pid) { return kill(pid, 0) < 0 && errno == ESRCH; }
+// A process of this user that exited but was never reaped. It runs no
+// executable, so it cannot be an app; newer macOS answers proc_pidinfo and
+// proc_pidpath for it with ESRCH while kill(pid, 0) still succeeds.
+static bool maintenance_zombie(pid_t pid) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    struct kinfo_proc info; size_t size = sizeof(info);
+    memset(&info, 0, sizeof(info));
+    return sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size == sizeof(info) && info.kp_proc.p_pid == pid &&
+           info.kp_eproc.e_ucred.cr_uid == getuid() && info.kp_proc.p_stat == SZOMB;
+}
 static bool maintenance_match(const char *executable, const char *app) {
     if (app) {
         size_t size = strlen(app);
@@ -46,7 +57,7 @@ static int maintenance_process_state(const char *app) {
         pid_t pid = pids[i]; if (pid <= 0) continue;
         struct proc_bsdinfo before, after;
         if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &before, sizeof(before)) != sizeof(before)) {
-            if (maintenance_gone(pid)) continue; result = 2; break;
+            if (maintenance_gone(pid) || maintenance_zombie(pid)) continue; result = 2; break;
         }
         if (before.pbi_status == SZOMB) continue;
         if (before.pbi_pid != (uint32_t)pid || before.pbi_uid != getuid()) { result = 2; break; }
@@ -56,7 +67,7 @@ static int maintenance_process_state(const char *app) {
             proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &after, sizeof(after)) != sizeof(after)) {
             int error = errno;
             // Still unknown; keep scanning only to name every such process.
-            if (maintenance_gone(pid)) continue; maintenance_report(pid, &before, error); result = 2; continue;
+            if (maintenance_gone(pid) || maintenance_zombie(pid)) continue; maintenance_report(pid, &before, error); result = 2; continue;
         }
         if (after.pbi_status == SZOMB) continue;
         if (first[0] != '/' || !memchr(first, '\0', sizeof(first)) || !memchr(second, '\0', sizeof(second)) ||
