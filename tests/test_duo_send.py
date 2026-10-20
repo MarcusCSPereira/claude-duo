@@ -212,10 +212,13 @@ class DuoOpenTests(unittest.TestCase):
         pointer.parent.mkdir(parents=True)
         pointer.write_text(str(self.config))
         self.write_config("@links claude-dev")
-        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
-            spec = importlib.util.spec_from_file_location("duo_send_under_test", SCRIPT)
-            self.module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(self.module)
+        # For the whole test: the config's ~/.claude-duo expands at call time.
+        home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        home.start()
+        self.addCleanup(home.stop)
+        spec = importlib.util.spec_from_file_location("duo_send_under_test", SCRIPT)
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
         self.opened = []
 
         def fake_run(argv, **kwargs):
@@ -264,8 +267,8 @@ class DuoOpenTests(unittest.TestCase):
         session = "0f8fad5b-d9cb-469f-a165-70867728950e"
         finished = {"ok": True, "session": session, "cost_usd": 0.01, "answer": "done", "error": None}
         with mock.patch.object(self.module.loop, "converse", return_value=finished):
-            code, out, _ = self.main("send", "task", "--repo", str(self.repo), "--open", "--json")
-        self.assertEqual(code, 0)
+            code, out, err = self.main("send", "task", "--repo", str(self.repo), "--open", "--json")
+        self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["opened"].split("?")[0], "claude-dev://resume")
         self.assertEqual(self.link()[2]["session"], session)
 
