@@ -122,6 +122,9 @@ account, in a repository you name:
 - **`--bg`:** a background session on the Duo's account; returns its id at
   once. `duo-send.py agents`, `logs <id>`, `attach <id>` and `stop <id>` reach
   the Duo's sessions, which the original's `claude agents` does not list.
+- **Before the first send:** the Duo's `claude` command needs a login of its
+  own (loop-duo too), and `--bg` a folder the Duo trusts. See
+  [docs/DUO_SEND.md](docs/DUO_SEND.md#before-the-first-send).
 - **Same isolation as loop-duo:** the Duo's account, environment and
   `claude -p` turn come from `loop-duo.py`. `bypassPermissions` is refused.
 - **From the original Claude:** `install-duo.sh` installs the script in

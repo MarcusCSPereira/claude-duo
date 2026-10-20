@@ -15,6 +15,46 @@ Duo's account, in a repository you name.
 Like loop-duo, the script uses only the Python 3.9 standard library and does
 not touch the apps.
 
+## Before the first send
+
+The Duo app working is not enough: the script runs the Duo's `claude` command,
+which needs two things of its own. Seen with Claude Code 2.1.303.
+
+1. **A CLI login on the Duo's account.** A Code session in the Duo app signs
+   in through the app. `duo-send.py` removes the `CLAUDE*` and `ANTHROPIC_*`
+   variables (see [Accounts and environment](#accounts-and-environment)), so
+   its `claude` has only the login stored in `~/.claude-duo`. Without one,
+   every send stops at once with `Not logged in · Please run /login` and costs
+   nothing. Sign in once, from Terminal rather than a shell a Claude session
+   opened, which carries that session's variables:
+
+   ```bash
+   CLAUDE_CONFIG_DIR=~/.claude-duo claude
+   ```
+
+   Run `/login` there with the Duo's account, quit, and check:
+
+   ```bash
+   CLAUDE_CONFIG_DIR=~/.claude-duo claude auth status
+   ```
+
+   It should say `"loggedIn": true` with the Duo's account. The original's
+   `claude auth status` keeps its own account.
+2. **A trusted folder for `--bg`.** A background session starts only in a
+   folder the Duo's account trusts; otherwise `--bg` fails with ``Workspace not
+   trusted. Run `claude` in <folder> once and accept the trust prompt``. The
+   synchronous mode (`claude -p`) runs in the same folder without it. A folder
+   already opened in the Duo's Code tab is trusted; for any other, once:
+
+   ```bash
+   cd ~/path/to/repo && CLAUDE_CONFIG_DIR=~/.claude-duo claude
+   ```
+
+   and accept the trust prompt.
+
+If the Duo line of the config sets another `CLAUDE_CONFIG_DIR`, use that
+folder instead of `~/.claude-duo`.
+
 ## Two modes
 
 | | synchronous (default) | `--bg` |
