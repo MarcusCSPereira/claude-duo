@@ -38,12 +38,21 @@ build_one() (
     "$CI_PB" -c "Set :CFBundleIdentifier ${ids[$idx]}" "$bundle/Contents/Info.plist" || return 1
     "$CI_PB" -c "Set :CFBundleDisplayName Claude $name" "$bundle/Contents/Info.plist" || return 1
     "$CI_PB" -c 'Set :CFBundleExecutable launcher' "$bundle/Contents/Info.plist" || return 1
-    local key
+    local key links_changed=0
     for key in CFBundleURLTypes NSUserActivityTypes; do
         if "$CI_PB" -c "Print :$key" "$bundle/Contents/Info.plist" >/dev/null 2>&1; then
             "$CI_PB" -c "Delete :$key" "$bundle/Contents/Info.plist" || return 1
         fi
     done
+    if [ "$CI_LINKS" = claude-dev ]; then
+        # The copy's own way in for links: claude:// stays with the official
+        # app; the Desktop also accepts claude-dev://. The record expects this.
+        "$CI_PB" -c 'Add :CFBundleURLTypes array' -c 'Add :CFBundleURLTypes:0 dict' \
+            -c "Add :CFBundleURLTypes:0:CFBundleURLName string Claude $name links" \
+            -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array' \
+            -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string claude-dev' "$bundle/Contents/Info.plist" || return 1
+        links_changed=1
+    fi
     icon="$CI_ICONS/$(ci_lower "$name").icns"
     [ ! -L "$icon" ] && { [ ! -e "$icon" ] || [ -f "$icon" ]; } || { ci_error 'icon master is not a regular file'; return 1; }
     if [ ! -f "$icon" ]; then
@@ -79,7 +88,7 @@ build_one() (
     codesign --force -s - "$bundle/Contents/MacOS/Claude" || return 1
     codesign --force -s - "$bundle" || return 1
     ci_integrity_helper_valid || return 1
-    ci_integrity_settled record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" "$product_changed" || return 1
+    ci_integrity_settled record "$CI_ICONS/integrity" "$build_id" "$bundle" "$CI_SRC" "$name" "${ids[$idx]}" "$(ci_integrity_binding "$idx")" "$icon_changed" "$product_changed" "$links_changed" || return 1
     ci_verify_one "$bundle" "$idx" || return 1
     ci_prepare_data_dir "${dirs[$idx]}" desktop || return 1
     ci_prepare_data_dir "${code_dirs[$idx]}" code || return 1

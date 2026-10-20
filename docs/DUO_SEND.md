@@ -79,5 +79,11 @@ tells the Duo not to send work to itself.
 ## Opening the session in the Duo app
 
 `duo-send` runs on the Duo's account, but the session lives in its Code
-profile, not in the Duo window. What it would take to open it there is in
-[DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
+profile, not in the Duo window. After `duo/install-duo.sh --links`:
+
+- `duo-send.py open --repo PATH --prompt "…"` opens a new Code session in the
+  Duo window, with the folder chosen and the prompt filled in;
+- `send … --open` imports the finished session into the Duo window;
+- `open --session <uuid>` imports any Duo session by id.
+
+How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).

@@ -6,6 +6,8 @@
 # build to the "Update Claude Duo" app instead. Safe to run again.
 #   --no-auto-check   do not install the launch agent that asks after updates
 #   --no-build        prepare everything but do not build the Duo now
+#   --links           let the Duo take claude-dev:// links (duo-send.py open):
+#                     adds `@links claude-dev` to the config before building
 DUO_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 source "$DUO_TOOLS/duo-common.sh" || exit 1
 set -u
@@ -18,11 +20,12 @@ AGENT="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 UPDATER_APP="$HOME/Applications/Update Claude Duo.app"
 LEGACY_UPDATER_APP="$HOME/Applications/Atualizar Claude Duo.app"
 
-auto_check=yes; build=yes
+auto_check=yes; build=yes; links=no
 for arg in "$@"; do
     case "$arg" in
         --no-auto-check) auto_check=no ;;
         --no-build) build=no ;;
+        --links) links=yes ;;
         *) duo_error "unknown option: $arg"; exit 2 ;;
     esac
 done
@@ -59,6 +62,14 @@ else
     /bin/chmod 600 "$config" || exit 1
 fi
 printf '%s\n' "$config" > "$DUO_CONFIG_POINTER" && /bin/chmod 600 "$DUO_CONFIG_POINTER" || exit 1
+if [ "$links" = yes ] && ! /usr/bin/grep -qx '[[:space:]]*@links claude-dev[[:space:]]*' "$config"; then
+    # One `@links claude-dev` right after `@apps`; any other @links line goes.
+    ( umask 077
+      /usr/bin/awk '/^[[:space:]]*@links/ { next } { print } /^[[:space:]]*@apps/ && !done { print "@links claude-dev"; done = 1 } END { exit done ? 0 : 3 }' \
+          "$config" > "$config.links.tmp" ) || { /bin/rm -f "$config.links.tmp"; fail "no @apps line in $config: add  @links claude-dev  before the Duo line by hand"; }
+    /bin/chmod 600 "$config.links.tmp" && /bin/mv -f "$config.links.tmp" "$config" || exit 1
+    echo "Links: claude-dev:// turned on (the build below applies it)"
+fi
 echo "Config: $config"
 
 step "Installing the versioned toolset"

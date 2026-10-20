@@ -127,9 +127,13 @@ account, in a repository you name:
 - **From the original Claude:** link the skill with
   `ln -s ~/claude-duo/duo/skills/duo-send ~/.claude/skills/duo-send`.
 
-Details: [docs/DUO_SEND.md](docs/DUO_SEND.md). Opening the session in the Duo
-window is not done yet; the options are in
-[docs/DUO_VISIBLE_SESSION.md](docs/DUO_VISIBLE_SESSION.md).
+- **On the Duo's screen:** after `duo/install-duo.sh --links` (it adds
+  `@links claude-dev` to the config and rebuilds), `duo-send.py open --repo … --prompt "…"`
+  opens a new Code session in the Duo window, and `send … --open` imports the
+  finished session there. Details in
+  [docs/DUO_VISIBLE_SESSION.md](docs/DUO_VISIBLE_SESSION.md).
+
+Details: [docs/DUO_SEND.md](docs/DUO_SEND.md).
 
 ## How it works
 

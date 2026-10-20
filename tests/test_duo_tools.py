@@ -307,6 +307,21 @@ class DuoToolsTests(unittest.TestCase):
         self.assertFalse((self.home / "Library/LaunchAgents").exists())
         self.assertEqual(self.log("launchctl.log"), "")
 
+    def test_installer_links_adds_one_links_line_after_apps(self):
+        installer = self.installer_fixture()
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.write_text(config.read_text().replace("@apps user\n", "@apps user\n@links none\n"))
+        for _ in range(2):  # Running it again changes nothing.
+            result = self.run_installer(installer, "--no-build", "--no-auto-check", "--links")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = config.read_text().splitlines()
+            self.assertEqual(lines[:3], ["@mode original-copy", "@apps user", "@links claude-dev"])
+            self.assertEqual(sum(line.startswith("@links") for line in lines), 1)
+            self.assertIn("Duo | io.github.tester.claude-duo |", lines[3])
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(config.with_name(config.name + ".links.tmp").exists())
+
     def test_installer_reuses_an_earlier_manual_duo_config(self):
         installer = self.installer_fixture()
         manual = self.home / ".config/claude-instances/duo-validation.conf"

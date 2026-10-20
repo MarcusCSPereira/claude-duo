@@ -53,6 +53,25 @@ TASK
   original account's `claude agents` does not list it.
 - `--max-cost` does not work with `--bg`.
 
+## On the Duo's screen
+
+When the user wants to see or drive the session in the Claude Duo window:
+
+```bash
+/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py open --repo /path/to/repo --prompt "short prompt"
+/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send - --repo /path/to/repo --open --json <<'TASK'
+<the brief>
+TASK
+```
+
+- `open` starts a new Code session in the Duo window with the prompt filled
+  in; the user presses Enter there. `send --open` runs the task, then imports
+  the session into the Duo window.
+- It needs the Duo built with links. If the script refuses for that reason,
+  tell the user to run `duo/install-duo.sh --links` from an up-to-date
+  checkout, which rebuilds the Duo and quits and reopens both apps; do not run
+  it or edit the config yourself.
+
 ## Do not
 
 - Do not pass `--permission bypassPermissions` (it is refused anyway).

@@ -138,7 +138,10 @@ ci_load_config() {
     # retain the legacy policy until an explicit, reviewed transition.
     CI_MODE=legacy-copies
     CI_APP_SCOPE=system; CI_APPS="$CI_SYSTEM_APPS"
-    local mode_seen=no apps_seen=no line n bid dir hue env extra pair key value seen normalized code_dir a b
+    # Links: off unless the config asks; only claude-dev, which the Desktop
+    # accepts and the official app does not register.
+    CI_LINKS=none
+    local mode_seen=no apps_seen=no links_seen=no line n bid dir hue env extra pair key value seen normalized code_dir a b
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%%#*}"; line="$(ci_trim "$line")"
         [ -n "$line" ] || continue
@@ -150,6 +153,10 @@ ci_load_config() {
             [ "$apps_seen" = no ] && [ "${#names[@]}" -eq 0 ] || { ci_error 'apps location must appear once before instances'; return 1; }
             case "$line" in '@apps system') CI_APP_SCOPE=system ;; '@apps user') CI_APP_SCOPE=user ;; *) ci_error 'unknown apps location; use system or user'; return 1 ;; esac
             apps_seen=yes; continue ;;
+        @links*)
+            [ "$links_seen" = no ] && [ "${#names[@]}" -eq 0 ] || { ci_error 'links must appear once before instances'; return 1; }
+            case "$line" in '@links claude-dev') CI_LINKS=claude-dev ;; '@links none') CI_LINKS=none ;; *) ci_error 'unknown links scheme; use claude-dev or none'; return 1 ;; esac
+            links_seen=yes; continue ;;
         esac
         IFS='|' read -r n bid dir hue env extra <<<"$line"
         [ -z "${extra:-}" ] && [[ "$line" != *'|'*'|'*'|'*'|'*'|'* ]] || { ci_error 'too many config columns'; return 1; }
@@ -186,6 +193,7 @@ ci_load_config() {
     done < "$CI_CONF"
     [ "${#names[@]}" -gt 0 ] || { ci_error 'no instances configured'; return 1; }
     if [ "$CI_APP_SCOPE" = user ]; then ci_user_app_directory "$config_home" || return 1; fi
+    [ "$CI_LINKS" = none ] || [ "$CI_MODE" = original-copy ] || { ci_error 'links require original-copy mode (one managed copy)'; return 1; }
     if [ "$CI_MODE" = original-copy ]; then
         [ "${#names[@]}" -eq 1 ] || { ci_error 'original-copy mode requires exactly one managed copy'; return 1; }
         local stock_desktop stock_code
@@ -305,6 +313,7 @@ ci_integrity_binding() {
     result="$(
         {
             [ "$CI_APP_SCOPE" != user ] || printf '%s\0' MCD_USER_APPLICATIONS_1 "$CI_APPS"
+            [ "$CI_LINKS" = none ] || printf '%s\0' MCD_LINKS_1 "$CI_LINKS"
             printf '%s\0' "$policy" "${names[$idx]}" "${ids[$idx]}" "${dirs[$idx]}" "${code_dirs[$idx]}" "${hues[$idx]}"
         } | /usr/bin/shasum -a 256
     )" || return 1
