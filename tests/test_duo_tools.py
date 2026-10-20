@@ -257,6 +257,10 @@ class DuoToolsTests(unittest.TestCase):
         (checkout / "duo").mkdir(parents=True)
         (checkout / "scripts").mkdir()
         shutil.copyfile(REPO / "scripts/share-code-profile.py", checkout / "scripts/share-code-profile.py")
+        for name in ("duo-send.py", "loop-duo.py"):
+            shutil.copyfile(REPO / "duo" / name, checkout / "duo" / name)
+        (checkout / "duo/skills/duo-send").mkdir(parents=True)
+        shutil.copyfile(REPO / "duo/skills/duo-send/SKILL.md", checkout / "duo/skills/duo-send/SKILL.md")
         for name in ("duo-common.sh", "update-duo.sh", "check-update.sh"):
             self.install_patched(REPO / "duo" / name, checkout / "duo" / name)
         code = self.patch((REPO / "duo/install-duo.sh").read_text())
@@ -306,6 +310,65 @@ class DuoToolsTests(unittest.TestCase):
         self.assertIn("| 100 |", config.read_text())
         self.assertFalse((self.home / "Library/LaunchAgents").exists())
         self.assertEqual(self.log("launchctl.log"), "")
+
+    def test_installer_links_adds_one_links_line_after_apps(self):
+        installer = self.installer_fixture()
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.write_text(config.read_text().replace("@apps user\n", "@apps user\n@links none\n"))
+        for _ in range(2):  # Running it again changes nothing.
+            result = self.run_installer(installer, "--no-build", "--no-auto-check", "--links")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = config.read_text().splitlines()
+            self.assertEqual(lines[:3], ["@mode original-copy", "@apps user", "@links claude-dev"])
+            self.assertEqual(sum(line.startswith("@links") for line in lines), 1)
+            self.assertIn("Duo | io.github.tester.claude-duo |", lines[3])
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(config.with_name(config.name + ".links.tmp").exists())
+
+    def test_installer_gives_the_original_claude_the_duo_send_skill_and_script(self):
+        installer = self.installer_fixture()
+        (self.home / ".claude").mkdir()
+        result = self.run_installer(installer, "--no-build", "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("duo-send.py", "loop-duo.py"):
+            self.assertEqual((self.tools / name).read_bytes(), (REPO / "duo" / name).read_bytes())
+            self.assertEqual((self.tools / name).stat().st_mode & 0o777, 0o700, name)
+        skill = self.home / ".claude/skills/duo-send/SKILL.md"
+        self.assertEqual(skill.read_bytes(), (REPO / "duo/skills/duo-send/SKILL.md").read_bytes())
+        self.assertIn("~/.local/share/claude-duo/duo-send.py", skill.read_text())
+        # Running it again refreshes the copy it installed.
+        skill.write_text(skill.read_text().replace("Always run", "Older text. Always run"))
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
+        self.assertEqual(skill.read_bytes(), (REPO / "duo/skills/duo-send/SKILL.md").read_bytes())
+
+    def test_installer_keeps_a_skill_of_the_user_and_honors_no_skill(self):
+        installer = self.installer_fixture()
+        skills = self.home / ".claude/skills"
+        own = skills / "duo-send"
+        own.mkdir(parents=True)
+        (own / "SKILL.md").write_text("my own duo-send\n")
+        result = self.run_installer(installer, "--no-build", "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not installed by Claude Duo", result.stdout)
+        self.assertEqual((own / "SKILL.md").read_text(), "my own duo-send\n")
+        (own / "SKILL.md").unlink()
+        own.rmdir()
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        own.symlink_to(elsewhere, target_is_directory=True)
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check").returncode, 0)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        own.unlink()
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check", "--no-skill").returncode, 0)
+        self.assertFalse(own.exists())
+
+    def test_installer_skips_the_skill_without_a_code_folder(self):
+        installer = self.installer_fixture()
+        result = self.run_installer(installer, "--no-build", "--no-auto-check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no Code folder", result.stdout)
+        self.assertFalse((self.home / ".claude").exists())
 
     def test_installer_reuses_an_earlier_manual_duo_config(self):
         installer = self.installer_fixture()
@@ -378,6 +441,29 @@ class DuoToolsTests(unittest.TestCase):
         for path in self.account:
             self.assertEqual((path / "invented-account-data").read_text(), "keep")
         self.assertIn("bootout", self.log("launchctl.log"))
+
+    def test_uninstaller_moves_the_installed_skill_but_not_one_of_the_user(self):
+        (self.home / ".claude").mkdir()
+        uninstaller = self.uninstall_fixture()
+        ours = self.home / ".claude/skills/duo-send"
+        theirs = self.home / ".claude/skills/other"
+        theirs.mkdir()
+        (theirs / "SKILL.md").write_text("mine\n")
+        self.assertTrue((ours / "SKILL.md").exists())
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(ours.exists())
+        self.assertTrue((self.trashed() / ".claude/skills/duo-send/SKILL.md").exists())
+        self.assertEqual((theirs / "SKILL.md").read_text(), "mine\n")
+
+    def test_uninstaller_keeps_a_duo_send_skill_it_did_not_install(self):
+        uninstaller = self.uninstall_fixture()
+        own = self.home / ".claude/skills/duo-send"
+        own.mkdir(parents=True)
+        (own / "SKILL.md").write_text("my own duo-send\n")
+        result = self.uninstall(uninstaller, "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((own / "SKILL.md").read_text(), "my own duo-send\n")
 
     def test_uninstaller_moves_account_data_only_when_asked(self):
         uninstaller = self.uninstall_fixture()

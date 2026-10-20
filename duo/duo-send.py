@@ -9,6 +9,11 @@
 - --bg: `claude --bg` on the Duo's account; returns at once with the id of a
   background session that `duo-send.py agents` lists and `attach` opens.
 
+`open` (and `send --open`) shows a session in the Claude Duo window through a
+claude-dev:// link, which the Duo registers when its config has
+`@links claude-dev`: a new Code session with the folder and the prompt filled
+in, or a session duo-send ran, imported by its id.
+
 The account, its environment and the `claude -p` turn come from loop-duo.py,
 so both scripts isolate the Duo the same way. Nothing here touches the apps.
 
@@ -25,6 +30,7 @@ import re
 import shlex
 import subprocess
 import sys
+import urllib.parse
 
 HERE = Path(__file__).resolve().parent
 
@@ -45,6 +51,11 @@ PERMISSION_MODES = loop.PERMISSION_MODES
 NAME = re.compile(r"^[\w .:/-]{1,60}$")
 BACKGROUND_ID = re.compile(r"backgrounded\s*\S*\s*([0-9A-Za-z][0-9A-Za-z-]{5,80})")
 FOLLOW_UP = ("agents", "logs", "attach", "stop")
+OPEN = "/usr/bin/open"
+SCHEME = "claude-dev"
+UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+PROMPT_LIMIT = 4000  # A link is visible in process listings; long briefs go through `send`.
 
 ROLE_SYNC = """\
 You are running on the Claude Duo account, the second Claude Code account of this Mac. The original account
@@ -70,6 +81,54 @@ def duo():
     if not acct["folder"].is_dir():
         raise Refused(f"the Duo account has no Code folder yet ({acct['folder']}); open Code in Claude Duo once")
     return acct
+
+
+def duo_app():
+    """The Duo's bundle id from the installed config, which must have `@links claude-dev`."""
+    pointer = loop.DUO_HOME / "config-path"
+    config = Path(pointer.read_text(encoding="utf-8").strip()) if pointer.is_file() and not pointer.is_symlink() else None
+    if not config or config.parent != loop.CONFIGS or config.suffix != ".conf" or not config.is_file() or config.is_symlink():
+        raise Refused("Claude Duo is not installed (no config); run duo/install-duo.sh")
+    links, bundle = None, None
+    for line in config.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith("@links"):
+            links = line.split(None, 1)[1].strip() if len(line.split(None, 1)) == 2 else ""
+        fields = [field.strip() for field in line.split("|")]
+        if fields[0] == "Duo" and len(fields) > 1:
+            bundle = fields[1]
+    if links != SCHEME:
+        raise Refused(f"the Duo does not take links yet ({config} has no `@links {SCHEME}`): run "
+                      "duo/install-duo.sh --links from an up-to-date checkout (see docs/DUO_VISIBLE_SESSION.md)")
+    if not bundle or not BUNDLE_ID.match(bundle):
+        raise Refused(f"no valid Duo line in {config}")
+    return bundle
+
+
+def open_link(path, params):
+    """Hands a claude-dev:// link to the Duo app by bundle id; returns the link."""
+    bundle = duo_app()
+    link = f"{SCHEME}://{path}?" + urllib.parse.urlencode([*params, ("source", "duo-send")], quote_via=urllib.parse.quote)
+    done = subprocess.run([OPEN, "-b", bundle, link], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30)
+    if done.returncode != 0:
+        raise Refused(f"open did not reach the Duo: {(done.stderr or done.stdout).strip()[:300]}")
+    return link
+
+
+def open_session(*, folder=None, prompt=None, session=None):
+    """A new Code session in the Duo window (folder, prompt filled in), or a CLI session imported by id."""
+    if session is not None:
+        if folder or prompt:
+            raise Refused("--session opens an existing session; leave out --repo and --prompt")
+        if not UUID.match(session):
+            raise Refused(f"invalid session id (the Duo imports a full UUID): {session!r}")
+        return {"ok": True, "link": open_link("resume", [("session", session)])}
+    if prompt and len(prompt) > PROMPT_LIMIT:
+        raise Refused(f"the prompt is longer than {PROMPT_LIMIT} characters; use `send` and then `open --session`")
+    params = [("folder", str(repository(folder)))]
+    if prompt and prompt.strip():
+        params.append(("q", prompt))
+    return {"ok": True, "link": open_link("code/new", params)}
 
 
 def repository(folder):
@@ -164,7 +223,12 @@ def main(argv=None):
     send.add_argument("--model")
     send.add_argument("--permission", choices=PERMISSION_MODES, default="auto")
     send.add_argument("--max-cost", type=float, help="spending ceiling in US$ (synchronous mode only)")
+    send.add_argument("--open", action="store_true", help="afterwards, opens the session in the Claude Duo window")
     send.add_argument("--json", action="store_true")
+    opening = commands.add_parser("open", help="opens a session in the Claude Duo window (needs @links claude-dev)")
+    opening.add_argument("--repo", help="folder of the new session (default: the current folder)")
+    opening.add_argument("--prompt", help='text filled in, not sent; "-" reads it from standard input')
+    opening.add_argument("--session", help="imports this session id (a UUID) instead of starting a new one")
     agents = commands.add_parser("agents", help="lists the Duo's background sessions (JSON)")
     agents.add_argument("--all", action="store_true", help="also the finished ones")
     for verb, text in (("logs", "prints a Duo background session's recent output"),
@@ -174,10 +238,20 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "open":
+            prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
+            result = open_session(folder=args.repo, prompt=prompt, session=args.session)
+            print(f"opened in Claude Duo: {result['link'].split('?')[0]}")
+            return 0
         if args.command != "send":
             return run_follow_up(args.command, getattr(args, "session", None), all_sessions=getattr(args, "all", False))
         task = sys.stdin.read() if args.task == "-" else args.task
+        if args.open:
+            duo_app()  # refuses before any work when the Duo takes no links
         if args.bg:
+            if args.open:
+                raise Refused("--open needs the session to finish first; with --bg, open it later with "
+                              "`duo-send.py open --session <uuid>`")
             if args.max_cost is not None:
                 raise Refused("--max-cost works only in the synchronous mode: claude enforces it with -p alone")
             result = send_background(task, folder=args.repo, model=args.model, permission=args.permission,
@@ -188,6 +262,11 @@ def main(argv=None):
             say = (lambda text: None) if args.json else (lambda text: print(text, file=sys.stderr))
             result = send_sync(task, folder=args.repo, model=args.model, permission=args.permission,
                                cost_max=args.max_cost, session=args.resume, say=say)
+            if args.open and result["ok"] and result.get("session"):
+                try:
+                    result["opened"] = open_session(session=result["session"])["link"]
+                except Refused as error:
+                    result["open_error"] = str(error)
     except Refused as error:
         if getattr(args, "json", False):
             print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
@@ -208,6 +287,8 @@ def main(argv=None):
             print(f"  {result['commands'][verb]}")
     else:
         print(result["answer"])
+        if result.get("opened") or result.get("open_error"):
+            print(f"[duo · {'opened in Claude Duo' if result.get('opened') else result['open_error']}]", file=sys.stderr)
         print(f"\n[duo · session {result['session']} · US$ {result['cost_usd'] or 0:.2f} estimated]", file=sys.stderr)
     return 0 if result["ok"] else 1
 

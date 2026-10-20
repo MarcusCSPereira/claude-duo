@@ -66,18 +66,29 @@ isolate the Duo the same way:
 
 ## From the original Claude: the skill
 
-`duo/skills/duo-send/SKILL.md` teaches a Claude Code session when and how to
-call the script. To make it available to the original account, link it:
+`duo/install-duo.sh` installs `duo-send.py` (with `loop-duo.py`, which it
+imports) in `~/.local/share/claude-duo`, and the skill
+`duo/skills/duo-send/SKILL.md` in `~/.claude/skills/duo-send`. The original
+Claude then knows when and how to call the script: ask it to "send this to the
+Duo", "open it in the Duo" and the like, or call `/duo-send <task>`.
 
-```bash
-ln -s ~/claude-duo/duo/skills/duo-send ~/.claude/skills/duo-send
-```
-
-With `share-code-profile.py`, the Duo sees the same skills folder; the skill
-tells the Duo not to send work to itself.
+- The installed skill is a copy with a marker line at the end. Running the
+  installer again refreshes it; a `duo-send` skill without the marker, or a
+  symlink, is yours and is never replaced.
+- `--no-skill` skips it. Without a `~/.claude` folder (the original never
+  opened Code), it is skipped with a message; run the installer again later.
+- `uninstall-duo.sh` moves the installed copy to the Trash with the rest.
+- With `share-code-profile.py`, the Duo sees the same skills folder; the skill
+  tells the Duo not to send work to itself.
 
 ## Opening the session in the Duo app
 
 `duo-send` runs on the Duo's account, but the session lives in its Code
-profile, not in the Duo window. What it would take to open it there is in
-[DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
+profile, not in the Duo window. After `duo/install-duo.sh --links`:
+
+- `duo-send.py open --repo PATH --prompt "…"` opens a new Code session in the
+  Duo window, with the folder chosen and the prompt filled in;
+- `send … --open` imports the finished session into the Duo window;
+- `open --session <uuid>` imports any Duo session by id.
+
+How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).

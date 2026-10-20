@@ -128,6 +128,15 @@ locks are per selected app directory, not cross-directory profile locks. Use one
 reviewed configuration/location per deployment. See the
 [GUI validation plan](docs/GUI_VALIDATION.md).
 
+`@links claude-dev` (once, before instance rows, `original-copy` mode only)
+gives the single managed copy one URL type, `Claude <name> links` with the
+`claude-dev` scheme, in place of the deleted `claude://` types. Any other value
+is refused, and `@links none` is the default. The integrity record expects
+exactly that entry, and the links setting is part of the config binding, so
+turning it on or off requires a rebuild (`duo/install-duo.sh --links` turns
+it on). See
+[DUO_VISIBLE_SESSION.md](docs/DUO_VISIBLE_SESSION.md).
+
 Custom providers, API credentials, endpoint overrides and proxy overrides are
 unsupported in this subscription mode. A required inherited proxy causes a
 launch refusal. System proxy configuration and Claude's managed settings are

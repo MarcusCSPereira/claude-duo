@@ -4,6 +4,9 @@ The fake claude answers like `claude -p --output-format stream-json`, like
 `claude --bg` and like `claude agents|logs|stop`; FAKE_MODE picks a failure.
 Nothing reaches a real account.
 """
+import contextlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -11,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+import urllib.parse
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "duo/duo-send.py"
@@ -189,6 +194,107 @@ class DuoSendTests(unittest.TestCase):
         process, end = self.send_json("task", "--repo", str(self.repo))
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(self.calls()[0]["folder"], str(custom))
+
+
+class DuoOpenTests(unittest.TestCase):
+    """`open` and `send --open`, in process, with `open` and `claude -p` replaced."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="duo-open-")
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        (self.home / ".claude-duo").mkdir()
+        self.repo = self.home / "project folder"
+        self.repo.mkdir()
+        self.config = self.home / ".config/claude-instances/claude-duo.conf"
+        self.config.parent.mkdir(parents=True)
+        pointer = self.home / ".local/share/claude-duo/config-path"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text(str(self.config))
+        self.write_config("@links claude-dev")
+        # For the whole test: the config's ~/.claude-duo expands at call time.
+        home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        home.start()
+        self.addCleanup(home.stop)
+        spec = importlib.util.spec_from_file_location("duo_send_under_test", SCRIPT)
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        self.opened = []
+
+        def fake_run(argv, **kwargs):
+            self.opened.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        patcher = mock.patch.object(self.module.subprocess, "run", side_effect=fake_run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write_config(self, links=""):
+        self.config.write_text(f"@mode original-copy\n@apps user\n{links}\n"
+                               "Duo | io.github.tester.claude-duo | ~/Library/Application Support/Claude-Duo | 212 | "
+                               "CLAUDE_CONFIG_DIR=~/.claude-duo\n")
+
+    def main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        umask = os.umask(0o022)  # main() sets 0o077 for its process; keep the test runner's
+        os.umask(umask)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = self.module.main(list(args))
+        finally:
+            os.umask(umask)
+        return code, out.getvalue(), err.getvalue()
+
+    def link(self, index=-1):
+        argv = self.opened[index]
+        self.assertEqual(argv[:3], ["/usr/bin/open", "-b", "io.github.tester.claude-duo"])
+        parsed = urllib.parse.urlsplit(argv[3])
+        return parsed.scheme, parsed.netloc + parsed.path, dict(urllib.parse.parse_qsl(parsed.query))
+
+    def test_open_starts_a_new_session_in_the_duo_window_with_folder_and_prompt(self):
+        code, out, _ = self.main("open", "--repo", str(self.repo), "--prompt", "fix the tests & push? no")
+        self.assertEqual(code, 0)
+        self.assertIn("opened in Claude Duo", out)
+        scheme, where, query = self.link()
+        self.assertEqual((scheme, where), ("claude-dev", "code/new"))
+        self.assertEqual(query, {"folder": str(self.repo), "q": "fix the tests & push? no", "source": "duo-send"})
+
+    def test_open_imports_a_session_by_its_uuid(self):
+        session = "0f8fad5b-d9cb-469f-a165-70867728950e"
+        self.assertEqual(self.main("open", "--session", session)[0], 0)
+        self.assertEqual(self.link(), ("claude-dev", "resume", {"session": session, "source": "duo-send"}))
+
+    def test_send_open_imports_the_finished_session(self):
+        session = "0f8fad5b-d9cb-469f-a165-70867728950e"
+        finished = {"ok": True, "session": session, "cost_usd": 0.01, "answer": "done", "error": None}
+        with mock.patch.object(self.module.loop, "converse", return_value=finished):
+            code, out, err = self.main("send", "task", "--repo", str(self.repo), "--open", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["opened"].split("?")[0], "claude-dev://resume")
+        self.assertEqual(self.link()[2]["session"], session)
+
+    def test_without_links_in_the_config_nothing_runs_and_the_fix_is_named(self):
+        self.write_config()
+        with mock.patch.object(self.module.loop, "converse") as converse:
+            for args in (("open", "--repo", str(self.repo)), ("send", "task", "--repo", str(self.repo), "--open")):
+                with self.subTest(args=args):
+                    code, _, err = self.main(*args)
+                    self.assertEqual(code, 1)
+                    self.assertIn("@links claude-dev", err)
+            converse.assert_not_called()
+        self.assertEqual(self.opened, [])
+
+    def test_refusals(self):
+        cases = [(("open", "--session", "sess-duo-0001"), "full UUID"),
+                 (("open", "--session", "0f8fad5b-d9cb-469f-a165-70867728950e", "--prompt", "x"), "leave out"),
+                 (("open", "--repo", str(self.home / "nowhere")), "does not exist"),
+                 (("open", "--prompt", "x" * 4001), "longer than"),
+                 (("send", "task", "--repo", str(self.repo), "--bg", "--open"), "open --session")]
+        for args, message in cases:
+            with self.subTest(args=args[:2]):
+                code, _, err = self.main(*args)
+                self.assertEqual(code, 1)
+                self.assertIn(message, err)
+        self.assertEqual(self.opened, [])
 
 
 if __name__ == "__main__":

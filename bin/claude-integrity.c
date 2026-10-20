@@ -224,7 +224,7 @@ static CFMutableDictionaryRef CreatePlist(int app) {
 static void set_string(CFMutableDictionaryRef d, CFStringRef key, const char *text) {
     CFStringRef value = CFStringCreateWithCString(NULL, text, kCFStringEncodingUTF8); if (!value) fail("invalid metadata string"); CFDictionarySetValue(d, key, value); CFRelease(value);
 }
-static void planned_metadata(int source, int app, const char *name, const char *bid, bool icon, const char *asar_source, const char *asar_app) {
+static void planned_metadata(int source, int app, const char *name, const char *bid, bool icon, bool links, const char *asar_source, const char *asar_app) {
     CFMutableDictionaryRef expected = CreatePlist(source), actual = CreatePlist(app);
     if (asar_source) {
         CFMutableDictionaryRef integrity = (CFMutableDictionaryRef)CFDictionaryGetValue(expected, CFSTR("ElectronAsarIntegrity"));
@@ -240,6 +240,16 @@ static void planned_metadata(int source, int app, const char *name, const char *
     char display[96]; int size = snprintf(display, sizeof(display), "Claude %s", name); if (size < 0 || (size_t)size >= sizeof(display)) fail("instance name too long");
     set_string(expected, CFSTR("CFBundleIdentifier"), bid); set_string(expected, CFSTR("CFBundleDisplayName"), display); set_string(expected, CFSTR("CFBundleExecutable"), "launcher");
     CFDictionaryRemoveValue(expected, CFSTR("CFBundleURLTypes")); CFDictionaryRemoveValue(expected, CFSTR("NSUserActivityTypes"));
+    if (links) {
+        // Exactly one URL type: "Claude <name> links" with the claude-dev scheme, nothing else.
+        char label[112]; size = snprintf(label, sizeof(label), "Claude %s links", name); if (size < 0 || (size_t)size >= sizeof(label)) fail("instance name too long");
+        CFMutableDictionaryRef type = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFMutableArrayRef schemes = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks), types = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+        if (!type || !schemes || !types) fail("allocation failed");
+        set_string(type, CFSTR("CFBundleURLName"), label); CFArrayAppendValue(schemes, CFSTR("claude-dev"));
+        CFDictionarySetValue(type, CFSTR("CFBundleURLSchemes"), schemes); CFArrayAppendValue(types, type);
+        CFDictionarySetValue(expected, CFSTR("CFBundleURLTypes"), types); CFRelease(schemes); CFRelease(type); CFRelease(types);
+    }
     if (icon) { set_string(expected, CFSTR("CFBundleIconFile"), "appicon"); CFDictionaryRemoveValue(expected, CFSTR("CFBundleIconName")); }
     if (!CFEqual(expected, actual)) fail("Info.plist differs beyond planned changes"); CFRelease(expected); CFRelease(actual);
 }
@@ -462,10 +472,10 @@ int main(int argc, char **argv) {
         struct stat unused; if (!fstatat(app, ASAR_TEMP, &unused, AT_SYMLINK_NOFOLLOW) || errno != ENOENT) fail("stale staged archive present");
         product_write(app, argv[3]); return 0;
     }
-    bool create = argc == 11 && !strcmp(argv[1], "record"), verify = argc == 5 && !strcmp(argv[1], "verify");
-    if (!create && !verify) fail("usage: integrity record ROOT UUID APP SOURCE NAME ID CONFIG ICON PRODUCT | verify ROOT APP CONFIG | product-name APP NAME");
+    bool create = argc == 12 && !strcmp(argv[1], "record"), verify = argc == 5 && !strcmp(argv[1], "verify");
+    if (!create && !verify) fail("usage: integrity record ROOT UUID APP SOURCE NAME ID CONFIG ICON PRODUCT LINKS | verify ROOT APP CONFIG | product-name APP NAME");
     const char *app_path = create ? argv[4] : argv[3], *binding = create ? argv[8] : argv[4];
-    if (!digest(binding) || (create && (!uuid(argv[3]) || (strcmp(argv[9], "0") && strcmp(argv[9], "1")) || (strcmp(argv[10], "0") && strcmp(argv[10], "1"))))) fail("invalid UUID/config/icon/product arguments");
+    if (!digest(binding) || (create && (!uuid(argv[3]) || (strcmp(argv[9], "0") && strcmp(argv[9], "1")) || (strcmp(argv[10], "0") && strcmp(argv[10], "1")) || (strcmp(argv[11], "0") && strcmp(argv[11], "1"))))) fail("invalid UUID/config/icon/product/links arguments");
     int records = root(argv[2], false, true), app = root(app_path, false, false); char id[37]; marker(app, id);
     if (create) {
         if (strcmp(id, argv[3])) fail("build marker UUID mismatch");
@@ -476,7 +486,7 @@ int main(int argc, char **argv) {
         char asar_before[65], asar_after[65];
         if (product) product_check(source, app, argv[6], asar_before, asar_after);
         else { struct stat unused; if (!fstatat(app, ASAR_TEMP, &unused, AT_SYMLINK_NOFOLLOW) || errno != ENOENT) fail("unexpected staged archive"); }
-        planned_metadata(source, app, argv[6], argv[7], icon, product ? asar_before : NULL, product ? asar_after : NULL);
+        planned_metadata(source, app, argv[6], argv[7], icon, !strcmp(argv[11], "1"), product ? asar_before : NULL, product ? asar_after : NULL);
         struct hashes original = tree(source, argv[5], true, icon, product), generated = tree(app, app_path, false, icon, product);
         if (memcmp(original.unchanged, generated.unchanged, 32)) fail("app resources differ beyond planned files");
         record_create(records, id, binding, original, generated); printf("RECORDED %s\n", id); return 0;
