@@ -72,7 +72,9 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
   closed, run the command below. It links the Duo's `CLAUDE.md`, skills, output
   styles, tools, plugins and per-project memories to the original's, and copies
   `settings.json` once. Sign-in, sessions and history stay separate. Install
-  plugins from the original. Details in [docs/PROFILE_REUSE.md](docs/PROFILE_REUSE.md).
+  plugins from the original. Add `--mcp-servers` to also copy your user-scope
+  MCP servers, credentials included; a server the Duo already has is kept.
+  Details in [docs/PROFILE_REUSE.md](docs/PROFILE_REUSE.md).
 
 ```bash
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing

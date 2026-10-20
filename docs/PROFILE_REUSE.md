@@ -20,6 +20,21 @@ Duo's Code (`~/.claude-duo`) use the **same files** as the original (`~/.claude`
   merged. After that, changes made in the Duo are preserved.
 - It never reads or writes `.claude.json`, sessions, history, transcripts
   (`projects/*/*.jsonl`), caches, policies or account state: only the list above.
+  The one exception is opt-in, below.
+- **MCP servers (`--mcp-servers`, added on 10/20/2026):** copies the user-scope
+  servers (`mcpServers` in the original's `~/.claude.json`) into the Duo's
+  `~/.claude-duo/.claude.json`, one name at a time. Only `mcpServers` changes
+  in the Duo's file; login, trust decisions and the rest stay as they are, and
+  the original's file is only read. A name the Duo already has is kept and
+  reported (`kept mcp`); a server deleted in the original stays in the Duo. The
+  choice is recorded in `.shared-from-original.json`, so later runs, including
+  the one after every Duo update, copy servers that are new to the original.
+  The output shows names and transport only. Servers are copied **as they
+  are**: command, arguments, `env` and headers, credentials included. Both apps
+  then reach the same external systems with the same credentials, which goes
+  against the "new connection by default" row below; it is the user's choice
+  for their own servers. Project-scope servers (`.mcp.json` in a repository)
+  and servers that plugins bring already reach both apps.
 - The default is a preview with no changes. `--apply` requires the Duo to be
   closed. An item that already exists in the Duo is refused, or moved (never
   deleted) to `.share-backup-<date>` with `--backup-existing`. Links that point

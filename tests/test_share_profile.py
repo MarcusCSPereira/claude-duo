@@ -154,6 +154,77 @@ class ShareProfileTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("duplicate JSON key", result.stderr)
 
+    def write_states(self, original, duo):
+        state = self.source / ".claude.json"
+        state.write_text(json.dumps({"oauthAccount": {"emailAddress": "a@example.com"}, "mcpServers": original}))
+        state.chmod(0o600)
+        (self.duo / ".claude.json").write_text(json.dumps(
+            {"oauthAccount": {"emailAddress": "b@example.com"}, "projects": {"/repo": {"hasTrustDialogAccepted": True}},
+             "mcpServers": duo}))
+        return ("--source-state", str(state))
+
+    def test_mcp_servers_are_copied_by_name_and_nothing_else_changes(self):
+        sap = {"type": "stdio", "command": "/usr/local/bin/vsp", "args": ["--password", SECRET]}
+        web = {"type": "http", "url": "https://mcp.example.com/mcp", "headers": {"Authorization": SECRET}}
+        mine = {"type": "stdio", "command": "/bin/duo-only"}
+        state = self.write_states({"sap": sap, "web": web, "shared": {"command": "/bin/a"}},
+                                  {"shared": {"command": "/bin/b"}, "mine": mine})
+        before = self.snapshot(self.duo)
+        preview = self.run_script("--mcp-servers", *state)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertEqual(self.snapshot(self.duo), before)
+        self.assertIn("copy mcp       sap (stdio)", preview.stdout)
+        self.assertIn("copy mcp       web (http)", preview.stdout)
+        self.assertIn("kept mcp       shared", preview.stdout)
+        self.assertNotIn(SECRET, preview.stdout + preview.stderr)
+        result = self.run_script("--apply", "--mcp-servers", *state)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        duo = json.loads((self.duo / ".claude.json").read_text())
+        self.assertEqual(duo["mcpServers"], {"sap": sap, "web": web, "shared": {"command": "/bin/b"}, "mine": mine})
+        self.assertEqual(duo["oauthAccount"]["emailAddress"], "b@example.com")
+        self.assertEqual(duo["projects"], {"/repo": {"hasTrustDialogAccepted": True}})
+        self.assertEqual((self.duo / ".claude.json").stat().st_mode & 0o777, 0o600)
+        self.assertIn("a@example.com", (self.source / ".claude.json").read_text())
+        manifest = json.loads((self.duo / ".shared-from-original.json").read_text())
+        self.assertEqual(manifest["mcp_servers"], ["sap", "web"])
+
+    def test_mcp_choice_is_remembered_and_never_overwrites_the_duo(self):
+        state = self.write_states({"sap": {"command": "/bin/sap"}}, {})
+        self.assertEqual(self.run_script("--apply", "--mcp-servers", *state).returncode, 0)
+        duo = json.loads((self.duo / ".claude.json").read_text())
+        duo["mcpServers"]["sap"]["args"] = ["--duo"]  # A Duo-only adjustment.
+        (self.duo / ".claude.json").write_text(json.dumps(duo))
+        original = json.loads((self.source / ".claude.json").read_text())
+        original["mcpServers"]["grafo"] = {"command": "/bin/grafo"}
+        (self.source / ".claude.json").write_text(json.dumps(original))
+        again = self.run_script("--apply", *state)  # No flag: the update hook's rerun.
+        self.assertEqual(again.returncode, 0, again.stderr)
+        servers = json.loads((self.duo / ".claude.json").read_text())["mcpServers"]
+        self.assertEqual(servers["sap"]["args"], ["--duo"])
+        self.assertEqual(servers["grafo"], {"command": "/bin/grafo"})
+
+    def test_mcp_servers_are_left_alone_unless_chosen(self):
+        state = self.write_states({"sap": {"command": "/bin/sap"}}, {})
+        before = (self.duo / ".claude.json").read_bytes()
+        result = self.run_script("--apply", *state)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("mcp", result.stdout)
+        self.assertEqual((self.duo / ".claude.json").read_bytes(), before)
+        self.assertNotIn("mcp_servers", json.loads((self.duo / ".shared-from-original.json").read_text()))
+
+    def test_unsafe_or_ambiguous_mcp_states_are_refused(self):
+        state = self.write_states({"sap": {"command": "/bin/sap"}}, {})
+        (self.source / ".claude.json").chmod(0o666)
+        unsafe = self.run_script("--mcp-servers", *state)
+        self.assertNotEqual(unsafe.returncode, 0)
+        self.assertIn("not writable by others", unsafe.stderr)
+        (self.source / ".claude.json").chmod(0o600)
+        (self.duo / ".claude.json").write_text('{"mcpServers": {}, "mcpServers": {"x": {}}}')
+        duplicate = self.run_script("--mcp-servers", *state)
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertIn("duplicate JSON key", duplicate.stderr)
+
     def test_running_duo_blocks_apply_but_not_the_dry_run(self):
         executable = self.app / "Contents/MacOS/Claude"
         executable.parent.mkdir(parents=True)

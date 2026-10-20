@@ -7,6 +7,11 @@ copied once, without keys that would select another account or provider.
 Never touches login, sessions, history, transcripts, caches or account state:
 only the allowlisted names below are read or written.
 
+With --mcp-servers, the user-scope MCP servers (mcpServers in the original's
+~/.claude.json) are copied into the Duo's .claude.json, one name at a time:
+a name the Duo already has is kept, and nothing else in either file is read
+back or changed. Once chosen, later runs also copy servers new to the original.
+
 Default is a dry run. --apply makes the changes with the Duo app closed;
 an existing destination item is moved, never deleted, into a backup folder
 only with --backup-existing.
@@ -107,6 +112,32 @@ def filtered_settings(source, destination):
     return result, removed
 
 
+def read_state(path, label):
+    state = json.loads(path.read_text(), object_pairs_hook=unique_object)
+    if not isinstance(state, dict):
+        raise Refused(f"{label} must be a JSON object")
+    servers = state.get("mcpServers", {})
+    if not isinstance(servers, dict) or not all(isinstance(v, dict) for v in servers.values()):
+        raise Refused(f"{label} mcpServers must be an object of objects")
+    return state, servers
+
+
+def plan_mcp_servers(source_state, destination_state):
+    """Names to copy and names kept as they are in the Duo; values are never printed."""
+    safe_source(source_state)
+    _, original = read_state(source_state, "original .claude.json")
+    if destination_state.is_symlink():
+        raise Refused("Duo .claude.json is a link; review it first")
+    current = read_state(destination_state, "Duo .claude.json")[1] if destination_state.exists() else {}
+    copy = sorted(name for name in original if name not in current)
+    kept = sorted(name for name in original if name in current and current[name] != original[name])
+    return original, copy, kept
+
+
+def transport(server):
+    return server.get("type") or ("http" if "url" in server else "stdio")
+
+
 def main(argv=None):
     home = Path(os.path.expanduser("~"))
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -116,6 +147,10 @@ def main(argv=None):
     parser.add_argument("--apply", action="store_true", help="make the changes (default: dry run)")
     parser.add_argument("--backup-existing", action="store_true",
                         help="move existing Duo items aside instead of refusing")
+    parser.add_argument("--source-state", type=Path, default=home / ".claude.json",
+                        help="the original's .claude.json, read only for --mcp-servers")
+    parser.add_argument("--mcp-servers", action="store_true",
+                        help="also copy the original's user-scope MCP servers (kept on later runs)")
     args = parser.parse_args(argv)
     try:
         source, destination = args.source.absolute(), args.destination.absolute()
@@ -171,6 +206,16 @@ def main(argv=None):
             else:
                 settings_kind = "copy"
 
+        manifest = destination / MANIFEST
+        previous = json.loads(manifest.read_text()) if manifest.exists() else {}
+        share_mcp = args.mcp_servers or "mcp_servers" in previous
+        state_destination = destination / ".claude.json"
+        servers, mcp_copy, mcp_kept = {}, [], []
+        if share_mcp:
+            if not args.source_state.exists():
+                raise Refused(f"original .claude.json not found: {args.source_state}")
+            servers, mcp_copy, mcp_kept = plan_mcp_servers(args.source_state.absolute(), state_destination)
+
         conflicts = [a for a in actions if a[0] == "conflict"]
         for kind, src, dst, note in actions:
             print(f"{kind:14} {dst} -> {src}" + (f"  ({note})" if note else ""))
@@ -179,6 +224,12 @@ def main(argv=None):
             print(f"{'not copied':14} settings.json {key} (selects an account or provider)")
         for memory in duo_only:
             print(f"{'kept':14} {memory} (memory only in the Duo; not merged)")
+        for name in mcp_copy:
+            print(f"{'copy mcp':14} {name} ({transport(servers[name])})")
+        for name in mcp_kept:
+            print(f"{'kept mcp':14} {name} (the Duo has its own definition)")
+        if mcp_copy:
+            print("MCP servers carry their command, arguments, env and headers as they are, credentials included.")
         if not args.apply:
             if conflicts and not args.backup_existing:
                 print("Existing Duo items above would be moved aside: add --backup-existing.")
@@ -215,6 +266,18 @@ def main(argv=None):
                 stream.flush()
                 os.fsync(stream.fileno())
             os.rename(temporary, settings_destination)
+        if mcp_copy:
+            # Reread right before writing so only mcpServers changes in the Duo's state.
+            state, current = read_state(state_destination, "Duo .claude.json") if state_destination.exists() else ({}, {})
+            state["mcpServers"] = {**current, **{name: servers[name] for name in mcp_copy if name not in current}}
+            temporary = destination / ".claude.json.share-new"
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(state, stream, indent=2, ensure_ascii=False)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.rename(temporary, state_destination)
         record = {
             "source": str(source),
             "links": sorted(str(a[2].relative_to(destination)) for a in actions if a[0] != "skip"),
@@ -222,13 +285,16 @@ def main(argv=None):
             "settings_sha256": hashlib.sha256(settings_destination.read_bytes()).hexdigest() if settings_destination.exists() else None,
             "updated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
+        if share_mcp:
+            record["mcp_servers"] = sorted(set(previous.get("mcp_servers", [])) | set(mcp_copy))
         temporary = destination / (MANIFEST + ".new")
         temporary.write_text(json.dumps(record, indent=2) + "\n")
         os.chmod(temporary, 0o600)
         os.rename(temporary, destination / MANIFEST)
         if backup.exists():
             print(f"Previous Duo items moved to {backup}")
-        print("Applied. Login, sessions, history and transcripts were not touched.")
+        print("Applied. Login, sessions, history and transcripts were not touched." +
+              (" Open a new Code session in the Duo to load the MCP servers." if mcp_copy else ""))
         return 0
     except Refused as error:
         print("refused: " + str(error), file=sys.stderr)
