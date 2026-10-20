@@ -106,6 +106,31 @@ the same repository, round after round, until the reviewer approves:
 
 Details and limits: [docs/LOOP_DUO.md](docs/LOOP_DUO.md).
 
+## duo-send: hand a task to the Duo's account (optional)
+
+The original Claude Code, or you in a terminal, can give a task to the Duo's
+account, in a repository you name:
+
+```bash
+/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
+```
+
+- **Synchronous (default):** `claude -p` on the Duo's account; prints the
+  answer when the work is done. `--max-cost` caps the spending, `--json`
+  returns the answer, session and cost, `--resume` continues a session.
+- **`--bg`:** a background session on the Duo's account; returns its id at
+  once. `duo-send.py agents`, `logs <id>`, `attach <id>` and `stop <id>` reach
+  the Duo's sessions, which the original's `claude agents` does not list.
+- **Same isolation as loop-duo:** the Duo's account, environment and
+  `claude -p` turn come from `loop-duo.py`. `bypassPermissions` is refused.
+- **From the original Claude:** link the skill with
+  `ln -s ~/claude-duo/duo/skills/duo-send ~/.claude/skills/duo-send`.
+
+Details: [docs/DUO_SEND.md](docs/DUO_SEND.md). Opening the session in the Duo
+window is not done yet; the options are in
+[docs/DUO_VISIBLE_SESSION.md](docs/DUO_VISIBLE_SESSION.md).
+
 ## How it works
 
 - The Duo is a copy of the official `Claude.app` in `~/Applications` with its
