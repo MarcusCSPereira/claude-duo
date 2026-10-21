@@ -62,8 +62,9 @@ UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 PROMPT_LIMIT = 4000  # A link is visible in process listings; long briefs go through `send`.
 # What the Duo's claude answers when its own setup is missing (see "Before the first send"): a turn the sign-in
-# check let through, or --bg in a folder the Duo's account never trusted.
-SIGNED_OUT = re.compile(r"not logged in|please run /login", re.IGNORECASE)
+# check let through, or --bg in a folder the Duo's account never trusted. Only claude's own wording: a bare
+# "not logged in" also matches gh's and npm's errors, which a failed turn may quote.
+SIGNED_OUT = re.compile(r"please run /login", re.IGNORECASE)
 UNTRUSTED = re.compile(r"workspace not trusted", re.IGNORECASE)
 
 ROLE_SYNC = """\
@@ -209,8 +210,8 @@ def hint(acct, where, error):
                 f"in a Terminal outside any Claude session: `{loop.login_command(acct)}` with the Duo's account, "
                 f"then check with `{follow_up(acct, 'auth status')}`")
     if UNTRUSTED.search(error or ""):
-        return (f"the Duo's account does not trust {where} yet. Once, in a Terminal: "
-                f"`cd {shlex.quote(str(where))} && {follow_up(acct)}` and accept the trust prompt, "
+        return (f"the Duo's account does not trust {where} yet. Once, in a Terminal outside any Claude session: "
+                f"`cd {shlex.quote(str(where))} && {follow_up(acct)}`, accept the trust prompt and /exit; "
                 "or open the folder in the Duo's Code tab")
     return None
 
@@ -243,7 +244,7 @@ def send_background(task, *, folder=None, model=None, permission="auto", name=No
     if started.returncode != 0 or not found:
         error = output.strip()[-400:] or f"exited with code {started.returncode}"
         return {"mode": "bg", "account": "duo", "repo": str(where), "ok": False, "id": None,
-                "error": error, "hint": hint(acct, where, error)}
+                "error": error, "hint": hint(acct, where, output or error)}
     agent_id = found.group(1)
     return {"mode": "bg", "account": "duo", "repo": str(where), "ok": True, "id": agent_id, "error": None, "hint": None,
             "commands": {verb: follow_up(acct, verb, None if verb == "agents" else agent_id) for verb in FOLLOW_UP}}

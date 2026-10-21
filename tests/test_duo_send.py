@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 from pathlib import Path
 import socket
 import subprocess
@@ -149,13 +150,14 @@ class DuoSendTests(unittest.TestCase):
         process, end = self.send_json("task", "--repo", str(self.repo), "--bg", FAKE_MODE="untrusted")
         self.assertEqual(process.returncode, 1)
         self.assertIn("Workspace not trusted", end["error"])
-        self.assertIn(f"`cd {self.repo} && CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude`", end["hint"])
-        self.assertIn("trust prompt", end["hint"])
+        self.assertIn(f"`cd {shlex.quote(str(self.repo))} && "
+                      f"CLAUDE_CONFIG_DIR={shlex.quote(str(self.home / '.claude-duo'))} claude`", end["hint"])
+        self.assertIn("trust prompt and /exit", end["hint"])
 
     def test_bg_starts_a_background_session_on_the_duo_account(self):
         process, end = self.send_json("refactor the parser", "--repo", str(self.repo), "--bg", "--name", "parser")
         self.assertEqual(process.returncode, 0, process.stderr)
-        self.assertEqual((end["ok"], end["mode"], end["id"]), (True, "bg", "4a79120f"))
+        self.assertEqual((end["ok"], end["mode"], end["id"], end["hint"]), (True, "bg", "4a79120f", None))
         [call] = self.calls()
         self.assertEqual(call["folder"], str(self.home / ".claude-duo"))
         self.assertEqual(call["leaked"], [])
@@ -173,6 +175,8 @@ class DuoSendTests(unittest.TestCase):
         self.assertEqual(process.returncode, 1)
         self.assertEqual((end["ok"], end["id"]), (False, None))
         self.assertIn("not logged in", end["error"])
+        # Only claude's "Please run /login" gets the login hint: this bare phrase is also gh's and npm's.
+        self.assertIsNone(end["hint"])
 
     def test_follow_up_commands_run_on_the_duo_account(self):
         listed = self.send("agents")

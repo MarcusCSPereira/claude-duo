@@ -21,29 +21,21 @@ The Duo app working is not enough: the script runs the Duo's `claude` command,
 which needs two things of its own. Seen with Claude Code 2.1.303.
 
 1. **A CLI login on the Duo's account.** The Duo app's sign-in does not cover
-   the command line (see [Accounts and environment](#accounts-and-environment)),
-   and the script stops before any work while it is missing. Sign in once, with
-   the Duo's account, in a Terminal outside any Claude session, which would
-   carry that session's `CLAUDE*` variables:
-
-   ```bash
-   CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login
-   ```
-
-   `CLAUDE_CONFIG_DIR=~/.claude-duo claude auth status` should then say
-   `"loggedIn": true` with the Duo's account; the original's `claude auth
-   status` keeps its own.
+   the command line, and the script stops before any work while it is missing;
+   the one-time `claude auth login` is in
+   [Accounts and environment](#accounts-and-environment).
 2. **A trusted folder for `--bg`.** A background session starts only in a
    folder the Duo's account trusts; otherwise `--bg` fails with ``Workspace not
    trusted. Run `claude` in <folder> once and accept the trust prompt``. The
    synchronous mode (`claude -p`) runs in the same folder without it. A folder
-   already opened in the Duo's Code tab is trusted; for any other, once:
+   already opened in the Duo's Code tab is trusted; for any other, once, in a
+   Terminal outside any Claude session:
 
    ```bash
    cd ~/path/to/repo && CLAUDE_CONFIG_DIR=~/.claude-duo claude
    ```
 
-   and accept the trust prompt.
+   accept the trust prompt and `/exit`.
 
 If the Duo line of the config sets another `CLAUDE_CONFIG_DIR`, use that
 folder instead of `~/.claude-duo`. When `--bg` fails for an untrusted folder,
