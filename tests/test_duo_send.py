@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -311,6 +312,80 @@ class DuoOpenTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(message, err)
         self.assertEqual(self.opened, [])
+
+
+class DuoSessionsTests(unittest.TestCase):
+    """`sessions` reads the Duo's registry; synthetic entries and real sockets under /tmp/cc-socks only."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="duo-sessions-")
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.registry = self.home / ".claude-duo/sessions"
+        self.registry.mkdir(parents=True)
+        (self.home / ".claude/sessions").mkdir(parents=True)
+        self.sockets = []
+        self.env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin"}
+
+    def live_socket(self):
+        """A listening socket in /tmp/cc-socks with a pid number nothing else uses there."""
+        folder = Path("/tmp/cc-socks")
+        folder.mkdir(mode=0o700, exist_ok=True)
+        number = 900000000 + os.getpid() % 1000 * 1000 + len(self.sockets)
+        path = folder / f"{number}.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(path))
+        self.addCleanup(lambda: (server.close(), path.unlink(missing_ok=True)))
+        self.sockets.append(path)
+        return str(path)
+
+    def entry(self, name, *, pid=None, sock=None, status="idle", file=None):
+        data = {"pid": pid or os.getpid(), "name": name, "status": status, "kind": "interactive",
+                "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e", "cwd": "/x",
+                "messagingSocketPath": sock if sock is not None else self.live_socket()}
+        (self.registry / (file or f"{len(list(self.registry.iterdir()))}.json")).write_text(json.dumps(data))
+        return data
+
+    def run_sessions(self, *args):
+        return subprocess.run([sys.executable, "-I", str(SCRIPT), "sessions", *args], capture_output=True,
+                              text=True, env=self.env, timeout=60)
+
+    def test_lists_live_duo_sessions_with_their_address(self):
+        live = self.entry("[proj] Valete · telas", status="busy")
+        self.entry("Gone session", pid=2 ** 22 + 7, sock="/tmp/cc-socks/1.sock")  # process gone
+        self.entry("No socket", sock="/tmp/cc-socks/999999999.sock")
+        self.entry("Odd path", sock=str(self.home / "x.sock"))
+        # The original's registry is never read.
+        (self.home / ".claude/sessions/1.json").write_text(json.dumps({"pid": os.getpid(), "name": "Original one",
+                                                                         "messagingSocketPath": live["messagingSocketPath"]}))
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([(s["name"], s["address"]) for s in listed],
+                         [("[proj] Valete · telas", "uds:" + live["messagingSocketPath"])])
+        with_stale = json.loads(self.run_sessions("--all", "--json").stdout)["sessions"]
+        self.assertEqual(sorted(s["name"] for s in with_stale if not s["live"]), ["Gone session", "No socket", "Odd path"])
+        self.assertTrue(all(s["address"] is None for s in with_stale if not s["live"]))
+        plain = self.run_sessions().stdout
+        self.assertIn("busy   uds:" + live["messagingSocketPath"], plain)
+
+    def test_address_needs_exactly_one_match(self):
+        one = self.entry("[proj] Valete · telas")
+        self.entry("[proj] Valete · conferências")
+        found = self.run_sessions("telas", "--address")
+        self.assertEqual((found.returncode, found.stdout.strip()), (0, "uds:" + one["messagingSocketPath"]))
+        for args, error in ((("valete", "--address"), "2 open Duo sessions match"),
+                            (("nobody", "--address"), "0 open Duo sessions match"),
+                            (("--address",), "needs a name")):
+            with self.subTest(args=args):
+                process = self.run_sessions(*args)
+                self.assertEqual(process.returncode, 1)
+                self.assertIn(error, process.stderr)
+
+    def test_symlinked_or_broken_entries_are_skipped(self):
+        self.entry("Real")
+        (self.registry / "bad.json").write_text("not json")
+        (self.registry / "link.json").symlink_to(self.registry / "0.json")
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([s["name"] for s in listed], ["Real"])
 
 
 if __name__ == "__main__":

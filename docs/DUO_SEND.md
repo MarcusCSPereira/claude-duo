@@ -98,27 +98,36 @@ profile, not in the Duo window. After `duo/install-duo.sh --links`:
 
 How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
 
-## Messages to sessions already open in the Duo app (tested, not built)
+## Talking to a session already open in the Duo app
 
-`duo-send` starts or continues its own sessions; it does not write into a
-session that is open in the Duo window. A `claude -p` session on the Duo's
-account can, through the session tools it has. Tested on 2026-10-21 with
-Claude Code 2.1.300:
+Sessions of the same account talk with `ListAgents` and `SendMessage`. Each
+account lists only its own sessions (`<config>/sessions/<pid>.json`), so the
+original's sessions never see the Duo's by name. But every session also
+answers on a local socket, `/tmp/cc-socks/<pid>.sock`, which both accounts
+share, and `SendMessage` accepts that socket as an address:
 
-- **It sees the Duo app's sessions.** A read-only probe (US$ 0.22) found
-  `ListAgents`, which listed the Duo app's five open sessions, and
-  `SendMessage`. Session lists are per account (`<config>/sessions`), so the
-  original's own sessions never see the Duo's.
-- **A message reaches an open Duo Desktop session.** A `send` whose task asked
-  for one `SendMessage` (US$ 0.29) delivered it to the target session, where it
-  arrived as a message from another session (`probe-bc`), in the Duo window.
-- **Addressing:** `to` must be the name exactly as `ListAgents` prints it,
-  bracketed folder prefix included (`[multi-claude-desktop] Session name`).
-  The name with the `[ref]` suffix was refused as "not reachable", and nothing
-  was sent.
-- **No way back yet:** the `-p` session ends with its turn, so a reply from the
-  Desktop session has nowhere to go. A `--bg` session stays alive and could
-  receive it, read with `duo-send.py logs`.
+```bash
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions "part of the name" --address
+```
 
-Not built: a `duo-send.py message <session> "text"` that wraps this. Until
-then, a `send` whose task asks for one `SendMessage` does it.
+`sessions` reads the Duo's registry and lists its open sessions with status
+and address (`uds:/tmp/cc-socks/<pid>.sock`); `--address` prints only the
+address of the one session that matches. In the original Claude, `SendMessage`
+with `to` set to that address delivers the message to the session in the Duo
+window, idle or busy; the Duo session sees the sender's address and its reply
+comes back by itself.
+
+- **The address changes** when the session's process restarts (the Desktop
+  restarts it at times), so look it up right before sending, never keep it. A
+  stale address fails with "ENOENT … the peer process may have restarted":
+  look it up again.
+- **Tested on 2026-10-21** (Claude Code 2.1.304 in both apps): a session of
+  the original app sent to a Duo Desktop session by socket address, the
+  message arrived in the Duo window, and the Duo session's `SendMessage` reply
+  to the sender's address was delivered. Idle Duo sessions keep their process
+  and socket.
+- **No cost on either account** beyond the turns the two sessions take; no
+  extra session in between.
+- It relies on the socket address, an undocumented detail of Claude Code; if a
+  future version changes it, `sessions` lists no address and `send` remains.
