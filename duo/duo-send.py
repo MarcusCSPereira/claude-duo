@@ -9,6 +9,10 @@
 - --bg: `claude --bg` on the Duo's account; returns at once with the id of a
   background session that `duo-send.py agents` lists and `attach` opens.
 
+`sessions` lists the sessions open on the Duo's account with the address their
+`SendMessage` socket answers on: the original's sessions cannot list the Duo's,
+but they can send to that address, and the reply comes back by itself.
+
 `open` (and `send --open`) shows a session in the Claude Duo window through a
 claude-dev:// link, which the Duo registers when its config has
 `@links claude-dev`: a new Code session with the folder and the prompt filled
@@ -28,6 +32,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import urllib.parse
@@ -74,6 +79,42 @@ attach to it to answer questions.
 - Do not merge, push to the default branch or change settings and permissions.
 - End with a short report: what you did, files touched, how you checked it and what is left.
 """
+
+
+SOCKET = re.compile(r"^/(?:private/)?tmp/cc-socks/\d{1,10}\.sock$")
+
+
+def is_socket(path):
+    try:
+        return stat.S_ISSOCK(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def open_duo_sessions(match=None, *, include_stale=False):
+    """The Duo's sessions from its registry (<config>/sessions/<pid>.json), with their SendMessage address.
+
+    The address is the session's messaging socket; it changes when the session's
+    process restarts, so it is read right before sending, never kept.
+    """
+    folder = duo()["folder"] / "sessions"
+    found = []
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        if path.is_symlink():
+            continue
+        data = loop.read_json(path)
+        if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
+            continue
+        name, socket = str(data.get("name") or ""), str(data.get("messagingSocketPath") or "")
+        if match and match.lower() not in name.lower():
+            continue
+        live = loop.process_alive(data["pid"]) and bool(SOCKET.match(socket)) and is_socket(socket)
+        if not live and not include_stale:
+            continue
+        found.append({"name": name, "status": data.get("status"), "kind": data.get("kind"), "pid": data["pid"],
+                      "cwd": data.get("cwd"), "session": data.get("sessionId"), "live": live,
+                      "address": f"uds:{socket}" if live else None})
+    return found
 
 
 def duo():
@@ -231,6 +272,12 @@ def main(argv=None):
     opening.add_argument("--repo", help="folder of the new session (default: the current folder)")
     opening.add_argument("--prompt", help='text filled in, not sent; "-" reads it from standard input')
     opening.add_argument("--session", help="imports this session id (a UUID) instead of starting a new one")
+    sessions = commands.add_parser("sessions", help="lists the Duo's open sessions with their SendMessage address")
+    sessions.add_argument("match", nargs="?", help="only sessions whose name contains this text")
+    sessions.add_argument("--address", action="store_true",
+                          help="prints only the address; exactly one session must match")
+    sessions.add_argument("--all", action="store_true", help="also sessions whose process or socket is gone")
+    sessions.add_argument("--json", action="store_true")
     agents = commands.add_parser("agents", help="lists the Duo's background sessions (JSON)")
     agents.add_argument("--all", action="store_true", help="also the finished ones")
     for verb, text in (("logs", "prints a Duo background session's recent output"),
@@ -244,6 +291,22 @@ def main(argv=None):
             prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
             result = open_session(folder=args.repo, prompt=prompt, session=args.session)
             print(f"opened in Claude Duo: {result['link'].split('?')[0]}")
+            return 0
+        if args.command == "sessions":
+            found = open_duo_sessions(args.match, include_stale=args.all and not args.address)
+            if args.address:
+                if len(found) != 1:
+                    raise Refused((f"{len(found)} open Duo sessions match {args.match!r}" if args.match else
+                                   "--address needs a name to match") + (": " + "; ".join(f["name"] for f in found)
+                                                                          if found else ""))
+                print(found[0]["address"])
+            elif args.json:
+                print(json.dumps({"sessions": found}, ensure_ascii=False, indent=2))
+            else:
+                for item in found:
+                    print(f"{item['status'] or '?':<6} {item['address'] or '(gone)':<28} {item['name']}")
+                if not found:
+                    print("No open Duo sessions" + (f" match {args.match!r}." if args.match else "."))
             return 0
         if args.command != "send":
             return run_follow_up(args.command, getattr(args, "session", None), all_sessions=getattr(args, "all", False))

@@ -1,6 +1,6 @@
 ---
 name: duo-send
-description: Hands a task to the Claude Duo account (the second Claude Code account of this Mac, CLAUDE_CONFIG_DIR=~/.claude-duo) through duo/duo-send.py — synchronously, returning its answer like a subagent on the other account, or as a background session (--bg) that the user follows with `duo-send.py agents` and `attach`. Use for "send this to the Duo", "ask the Duo to…", "open a session on the other account", "let the Duo work on it in the background", or when this account's usage is running out and the work can go on in the Duo. Not for review rounds between the two accounts (that is loop-duo) and not from a session that already runs on the Duo account.
+description: Talks to the Claude Duo account and hands it tasks (the second Claude Code account of this Mac, CLAUDE_CONFIG_DIR=~/.claude-duo) through duo/duo-send.py — synchronously, returning its answer like a subagent on the other account, or as a background session (--bg) that the user follows with `duo-send.py agents` and `attach`. Use for "send this to the Duo", "ask the Duo to…", "message the session X in the Duo", "tell the Duo session to…", "open a session on the other account", "let the Duo work on it in the background", or when this account's usage is running out and the work can go on in the Duo. Not for review rounds between the two accounts (that is loop-duo) and not from a session that already runs on the Duo account.
 ---
 
 # duo-send
@@ -72,6 +72,24 @@ TASK
   tell the user to run `duo/install-duo.sh --links` from an up-to-date
   checkout, which rebuilds the Duo and quits and reopens both apps; do not run
   it or edit the config yourself.
+
+## Talk to a session already open in the Duo app
+
+To message a session that is open in the Claude Duo window (instead of
+starting new work there):
+
+```bash
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions "part of its name" --address
+```
+
+- Then call `SendMessage` with `to` set to the printed `uds:/tmp/cc-socks/<pid>.sock`
+  address. Show the user the text and the target session first.
+- The reply arrives here as a message from another session; nothing to poll.
+- Look the address up right before each send: it changes when the Duo session
+  restarts. On "ENOENT … peer process may have restarted", look it up again
+  once.
+- Never send to an address you did not just read from `sessions`.
 
 ## When the script says "not signed in"
 

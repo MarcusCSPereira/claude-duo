@@ -137,6 +137,10 @@ account, in a repository you name:
 - **`--bg`:** a background session on the Duo's account; returns its id at
   once. `duo-send.py agents`, `logs <id>`, `attach <id>` and `stop <id>` reach
   the Duo's sessions, which the original's `claude agents` does not list.
+- **Talk to a session open in the Duo window:** `duo-send.py sessions` lists
+  the Duo's open sessions with their `uds:/tmp/cc-socks/<pid>.sock` address;
+  the original Claude's `SendMessage` to that address reaches the session, and
+  the reply comes back.
 - **Same isolation as loop-duo:** the Duo's account, environment and
   `claude -p` turn come from `loop-duo.py`. `bypassPermissions` is refused.
 - **From the original Claude:** `install-duo.sh` installs the script in
