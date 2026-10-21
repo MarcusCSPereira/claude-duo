@@ -161,6 +161,7 @@ def send_sync(task, *, folder=None, model=None, permission="auto", cost_max=None
     """One `claude -p` turn on the Duo's account; returns {ok, session, cost_usd, answer, error}."""
     check_options(task, model=model, name=None, session=session, cost_max=cost_max)
     acct, where = duo(), repository(folder)
+    loop.require_signed_in(acct)
     extra = ["--max-budget-usd", f"{cost_max:.2f}"] if cost_max is not None else []
     end = loop.converse(acct, session, task, folder=where, role_prompt=ROLE_SYNC, reviewer=False, model=model,
                         permission=permission, extra=extra,
@@ -172,6 +173,7 @@ def send_background(task, *, folder=None, model=None, permission="auto", name=No
     """Starts a `claude --bg` session on the Duo's account; returns its id and the follow-up commands."""
     check_options(task, model=model, name=name, session=session, cost_max=None)
     acct, where = duo(), repository(folder)
+    loop.require_signed_in(acct)
     argv = [loop.claude_bin(), "--bg", *(["--resume", session] if session else []),
             *(["--name", name] if name else []), *(["--model", model] if model else []),
             "--permission-mode", permission, "--append-system-prompt", ROLE_BG, task]

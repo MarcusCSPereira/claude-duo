@@ -49,6 +49,11 @@ isolate the Duo the same way:
   Duo's `claude` gets only its own `CLAUDE_CONFIG_DIR`;
 - the Duo's folder comes from the installed config, with `~/.claude-duo` as
   the fallback; a Duo that never opened Code is refused;
+- the Duo's command line must be signed in on its own: the Duo app's
+  sign-in does not cover it. Before any work, `claude auth status` runs on the
+  Duo's account; when it says signed out, the script stops and prints the
+  command to run in a Terminal, outside any Claude session:
+  `CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login`, with the Duo's account;
 - the work happens in `--repo` (the current folder by default), with no branch
   or worktree of its own. For work that must not touch your checkout, point
   `--repo` at a worktree, or use loop-duo.
@@ -92,3 +97,28 @@ profile, not in the Duo window. After `duo/install-duo.sh --links`:
 - `open --session <uuid>` imports any Duo session by id.
 
 How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
+
+## Messages to sessions already open in the Duo app (tested, not built)
+
+`duo-send` starts or continues its own sessions; it does not write into a
+session that is open in the Duo window. A `claude -p` session on the Duo's
+account can, through the session tools it has. Tested on 2026-10-21 with
+Claude Code 2.1.300:
+
+- **It sees the Duo app's sessions.** A read-only probe (US$ 0.22) found
+  `ListAgents`, which listed the Duo app's five open sessions, and
+  `SendMessage`. Session lists are per account (`<config>/sessions`), so the
+  original's own sessions never see the Duo's.
+- **A message reaches an open Duo Desktop session.** A `send` whose task asked
+  for one `SendMessage` (US$ 0.29) delivered it to the target session, where it
+  arrived as a message from another session (`probe-bc`), in the Duo window.
+- **Addressing:** `to` must be the name exactly as `ListAgents` prints it,
+  bracketed folder prefix included (`[multi-claude-desktop] Session name`).
+  The name with the `[ref]` suffix was refused as "not reachable", and nothing
+  was sent.
+- **No way back yet:** the `-p` session ends with its turn, so a reply from the
+  Desktop session has nowhere to go. A `--bg` session stays alive and could
+  receive it, read with `duo-send.py logs`.
+
+Not built: a `duo-send.py message <session> "text"` that wraps this. Until
+then, a `send` whose task asks for one `SendMessage` does it.
