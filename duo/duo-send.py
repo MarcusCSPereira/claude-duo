@@ -9,6 +9,10 @@
 - --bg: `claude --bg` on the Duo's account; returns at once with the id of a
   background session that `duo-send.py agents` lists and `attach` opens.
 
+`sessions` lists the sessions open on the Duo's account with the address their
+`SendMessage` socket answers on: the original's sessions cannot list the Duo's,
+but they can send to that address, and the reply comes back by itself.
+
 `open` (and `send --open`) shows a session in the Claude Duo window through a
 claude-dev:// link, which the Duo registers when its config has
 `@links claude-dev`: a new Code session with the folder and the prompt filled
@@ -28,6 +32,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import urllib.parse
@@ -56,7 +61,8 @@ SCHEME = "claude-dev"
 UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 PROMPT_LIMIT = 4000  # A link is visible in process listings; long briefs go through `send`.
-# What the Duo's claude says before any work when its own setup is missing (see "Before the first send").
+# What the Duo's claude answers when its own setup is missing (see "Before the first send"): a turn the sign-in
+# check let through, or --bg in a folder the Duo's account never trusted.
 SIGNED_OUT = re.compile(r"not logged in|please run /login", re.IGNORECASE)
 UNTRUSTED = re.compile(r"workspace not trusted", re.IGNORECASE)
 
@@ -77,6 +83,42 @@ attach to it to answer questions.
 - Do not merge, push to the default branch or change settings and permissions.
 - End with a short report: what you did, files touched, how you checked it and what is left.
 """
+
+
+SOCKET = re.compile(r"^/(?:private/)?tmp/cc-socks/\d{1,10}\.sock$")
+
+
+def is_socket(path):
+    try:
+        return stat.S_ISSOCK(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def open_duo_sessions(match=None, *, include_stale=False):
+    """The Duo's sessions from its registry (<config>/sessions/<pid>.json), with their SendMessage address.
+
+    The address is the session's messaging socket; it changes when the session's
+    process restarts, so it is read right before sending, never kept.
+    """
+    folder = duo()["folder"] / "sessions"
+    found = []
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        if path.is_symlink():
+            continue
+        data = loop.read_json(path)
+        if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
+            continue
+        name, socket = str(data.get("name") or ""), str(data.get("messagingSocketPath") or "")
+        if match and match.lower() not in name.lower():
+            continue
+        live = loop.process_alive(data["pid"]) and bool(SOCKET.match(socket)) and is_socket(socket)
+        if not live and not include_stale:
+            continue
+        found.append({"name": name, "status": data.get("status"), "kind": data.get("kind"), "pid": data["pid"],
+                      "cwd": data.get("cwd"), "session": data.get("sessionId"), "live": live,
+                      "address": f"uds:{socket}" if live else None})
+    return found
 
 
 def duo():
@@ -164,10 +206,10 @@ def hint(acct, where, error):
     """The one-time fix, as commands for the user's Terminal, when the Duo's claude refused for its setup."""
     if SIGNED_OUT.search(error or ""):
         return (f"the Duo's claude command is not signed in (the Duo app signs in only its own sessions). Once, "
-                f"from Terminal: `{follow_up(acct)}`, /login with the Duo's account, then check with "
-                f"`{follow_up(acct, 'auth status')}`")
+                f"in a Terminal outside any Claude session: `{loop.login_command(acct)}` with the Duo's account, "
+                f"then check with `{follow_up(acct, 'auth status')}`")
     if UNTRUSTED.search(error or ""):
-        return (f"the Duo's account does not trust {where} yet. Once, from Terminal: "
+        return (f"the Duo's account does not trust {where} yet. Once, in a Terminal: "
                 f"`cd {shlex.quote(str(where))} && {follow_up(acct)}` and accept the trust prompt, "
                 "or open the folder in the Duo's Code tab")
     return None
@@ -177,6 +219,7 @@ def send_sync(task, *, folder=None, model=None, permission="auto", cost_max=None
     """One `claude -p` turn on the Duo's account; returns {ok, session, cost_usd, answer, error, hint}."""
     check_options(task, model=model, name=None, session=session, cost_max=cost_max)
     acct, where = duo(), repository(folder)
+    loop.require_signed_in(acct)
     extra = ["--max-budget-usd", f"{cost_max:.2f}"] if cost_max is not None else []
     end = loop.converse(acct, session, task, folder=where, role_prompt=ROLE_SYNC, reviewer=False, model=model,
                         permission=permission, extra=extra,
@@ -189,6 +232,7 @@ def send_background(task, *, folder=None, model=None, permission="auto", name=No
     """Starts a `claude --bg` session on the Duo's account; returns its id and the follow-up commands."""
     check_options(task, model=model, name=name, session=session, cost_max=None)
     acct, where = duo(), repository(folder)
+    loop.require_signed_in(acct)
     argv = [loop.claude_bin(), "--bg", *(["--resume", session] if session else []),
             *(["--name", name] if name else []), *(["--model", model] if model else []),
             "--permission-mode", permission, "--append-system-prompt", ROLE_BG, task]
@@ -247,6 +291,12 @@ def main(argv=None):
     opening.add_argument("--repo", help="folder of the new session (default: the current folder)")
     opening.add_argument("--prompt", help='text filled in, not sent; "-" reads it from standard input')
     opening.add_argument("--session", help="imports this session id (a UUID) instead of starting a new one")
+    sessions = commands.add_parser("sessions", help="lists the Duo's open sessions with their SendMessage address")
+    sessions.add_argument("match", nargs="?", help="only sessions whose name contains this text")
+    sessions.add_argument("--address", action="store_true",
+                          help="prints only the address; exactly one session must match")
+    sessions.add_argument("--all", action="store_true", help="also sessions whose process or socket is gone")
+    sessions.add_argument("--json", action="store_true")
     agents = commands.add_parser("agents", help="lists the Duo's background sessions (JSON)")
     agents.add_argument("--all", action="store_true", help="also the finished ones")
     for verb, text in (("logs", "prints a Duo background session's recent output"),
@@ -260,6 +310,22 @@ def main(argv=None):
             prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
             result = open_session(folder=args.repo, prompt=prompt, session=args.session)
             print(f"opened in Claude Duo: {result['link'].split('?')[0]}")
+            return 0
+        if args.command == "sessions":
+            found = open_duo_sessions(args.match, include_stale=args.all and not args.address)
+            if args.address:
+                if len(found) != 1:
+                    raise Refused((f"{len(found)} open Duo sessions match {args.match!r}" if args.match else
+                                   "--address needs a name to match") + (": " + "; ".join(f["name"] for f in found)
+                                                                          if found else ""))
+                print(found[0]["address"])
+            elif args.json:
+                print(json.dumps({"sessions": found}, ensure_ascii=False, indent=2))
+            else:
+                for item in found:
+                    print(f"{item['status'] or '?':<6} {item['address'] or '(gone)':<28} {item['name']}")
+                if not found:
+                    print("No open Duo sessions" + (f" match {args.match!r}." if args.match else "."))
             return 0
         if args.command != "send":
             return run_follow_up(args.command, getattr(args, "session", None), all_sessions=getattr(args, "all", False))

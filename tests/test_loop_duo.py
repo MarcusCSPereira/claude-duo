@@ -19,6 +19,11 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 args = sys.argv[1:]
+if args[:2] == ["auth", "status"]:
+    out = os.environ.get("FAKE_AUTH_OUT")
+    signed_out = out == ("duo" if os.environ.get("CLAUDE_CONFIG_DIR") else "original")
+    print(json.dumps({"loggedIn": not signed_out}))
+    sys.exit(1 if signed_out else 0)
 request = sys.stdin.read()
 prompt = args[args.index("--append-system-prompt") + 1]
 role = "dev" if "DEVELOPER in a loop-duo" in prompt else "reviewer"
@@ -299,6 +304,19 @@ class LoopDuoTests(unittest.TestCase):
         loops = self.home / ".local/share/claude-duo/loops"
         self.assertEqual(list(loops.iterdir()) if loops.exists() else [], [])
         self.assertEqual(self.calls(), [])
+
+    def test_a_signed_out_cli_stops_the_loop_before_it_starts(self):
+        for account, command in (("duo", f"CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude auth login"),
+                                 ("original", "run  claude auth login")):
+            with self.subTest(account=account):
+                process, end = self.loop(FAKE_AUTH_OUT=account)
+                self.assertEqual(process.returncode, 1)
+                self.assertIn(f"the {account} account's Claude Code CLI is not signed in", end["error"])
+                self.assertIn(command, end["error"])
+        loops = self.home / ".local/share/claude-duo/loops"
+        self.assertEqual(list(loops.iterdir()) if loops.exists() else [], [])
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.git("branch", "--list", "loop-duo/*"), "")
 
     def test_list_shows_what_ran(self):
         self.loop()

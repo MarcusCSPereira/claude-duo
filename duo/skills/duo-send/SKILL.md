@@ -1,6 +1,6 @@
 ---
 name: duo-send
-description: Hands a task to the Claude Duo account (the second Claude Code account of this Mac, CLAUDE_CONFIG_DIR=~/.claude-duo) through duo/duo-send.py — synchronously, returning its answer like a subagent on the other account, or as a background session (--bg) that the user follows with `duo-send.py agents` and `attach`. Use for "send this to the Duo", "ask the Duo to…", "open a session on the other account", "let the Duo work on it in the background", or when this account's usage is running out and the work can go on in the Duo. Not for review rounds between the two accounts (that is loop-duo) and not from a session that already runs on the Duo account.
+description: Talks to the Claude Duo account and hands it tasks (the second Claude Code account of this Mac, CLAUDE_CONFIG_DIR=~/.claude-duo) through duo/duo-send.py — synchronously, returning its answer like a subagent on the other account, or as a background session (--bg) that the user follows with `duo-send.py agents` and `attach`. Use for "send this to the Duo", "ask the Duo to…", "message the session X in the Duo", "tell the Duo session to…", "open a session on the other account", "let the Duo work on it in the background", or when this account's usage is running out and the work can go on in the Duo. Not for review rounds between the two accounts (that is loop-duo) and not from a session that already runs on the Duo account.
 ---
 
 # duo-send
@@ -32,10 +32,8 @@ TASK
 
 - Prefer `-` with a quoted heredoc: quotes and backticks need no escaping.
 - `--json` returns `{ok, session, cost_usd, answer, error, hint}`. Relay
-  `answer` to the user; on `ok: false`, show `error`. A `hint` is the one-time
-  setup the Duo's `claude` still needs (its own login, or trusting the folder):
-  give the user its commands to run in Terminal; they are interactive, so do
-  not run them yourself.
+  `answer` to the user; on `ok: false`, show `error`, and `hint` when there is
+  one (see "When the script says…" below).
 - Nobody can answer the Duo during this turn: when it needs a decision, it
   says what is missing in its answer. Ask the user, then continue the same
   session with `--resume <session>`.
@@ -76,6 +74,32 @@ TASK
   tell the user to run `duo/install-duo.sh --links` from an up-to-date
   checkout, which rebuilds the Duo and quits and reopens both apps; do not run
   it or edit the config yourself.
+
+## Talk to a session already open in the Duo app
+
+To message a session that is open in the Claude Duo window (instead of
+starting new work there):
+
+```bash
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions "part of its name" --address
+```
+
+- Then call `SendMessage` with `to` set to the printed `uds:/tmp/cc-socks/<pid>.sock`
+  address. Show the user the text and the target session first.
+- The reply arrives here as a message from another session; nothing to poll.
+- Look the address up right before each send: it changes when the Duo session
+  restarts. On "ENOENT … peer process may have restarted", look it up again
+  once.
+- Never send to an address you did not just read from `sessions`.
+
+## When the script says "not signed in" or gives a `hint`
+
+The Duo's command line has its own sign-in, and `--bg` needs a folder the
+Duo's account trusts. Give the user the command the error or the `hint`
+prints, to run in a Terminal outside any Claude session (and, for the login,
+sign in with the Duo's account); they are interactive, so do not run them
+yourself.
 
 ## Do not
 

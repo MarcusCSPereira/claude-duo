@@ -74,21 +74,12 @@ the other account must not inherit it. The Duo's account gets only its own
 `CLAUDE_CONFIG_DIR`. The original runs without the variable: pointed at
 `~/.claude`, it would move `~/.claude.json` into that folder.
 
-So each account's `claude` command needs a CLI login of its own. A Code
-session in the Duo app signs in through the app, which leaves the Duo's CLI
-signed out: the Duo's first turn then fails with `Not logged in · Please run
-/login` and the loop stops as `failed`, while the Duo app keeps working. Sign
-in once, from Terminal rather than a shell a Claude session opened:
-
-```bash
-CLAUDE_CONFIG_DIR=~/.claude-duo claude
-```
-
-Run `/login` there with the Duo's account, quit, and check with
-`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth status`; `claude auth status`
-checks the original. Both turns run with `claude -p`, which does not ask for
-folder trust, so the loop's worktree needs none. Seen with Claude Code
-2.1.303.
+Each account's command line must be signed in, apart from its Desktop app:
+before the first round, `claude auth status` runs on both accounts, and a
+signed-out one stops the loop with the command to run in a Terminal
+(`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login` for the Duo's). Both
+turns run with `claude -p`, which does not ask for folder trust, so the
+loop's worktree needs none.
 
 ## Permissions
 

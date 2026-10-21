@@ -80,6 +80,21 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
 
+## Claude Code in the terminal for the Duo's account (loop-duo, duo-send)
+
+The Duo app and the `claude` command keep separate sign-ins: a Duo that works
+in its window still has a command line that never signed in. loop-duo and
+duo-send run `claude` on the Duo's account, so sign it in once, in a Terminal
+outside any Claude session, with the Duo's account:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login
+```
+
+`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth status` shows which account it
+is. The original's sign-in (`~/.claude`) is not touched. Both scripts check
+this before they start and print this command when it is missing.
+
 ## loop-duo: one account develops, the other reviews (optional)
 
 With both Code accounts on this Mac, one can develop and the other review in
@@ -122,9 +137,13 @@ account, in a repository you name:
 - **`--bg`:** a background session on the Duo's account; returns its id at
   once. `duo-send.py agents`, `logs <id>`, `attach <id>` and `stop <id>` reach
   the Duo's sessions, which the original's `claude agents` does not list.
-- **Before the first send:** the Duo's `claude` command needs a login of its
-  own (loop-duo too), and `--bg` a folder the Duo trusts. See
+- **`--bg` in a new folder:** a background session starts only in a folder
+  the Duo's account trusts. See
   [docs/DUO_SEND.md](docs/DUO_SEND.md#before-the-first-send).
+- **Talk to a session open in the Duo window:** `duo-send.py sessions` lists
+  the Duo's open sessions with their `uds:/tmp/cc-socks/<pid>.sock` address;
+  the original Claude's `SendMessage` to that address reaches the session, and
+  the reply comes back.
 - **Same isolation as loop-duo:** the Duo's account, environment and
   `claude -p` turn come from `loop-duo.py`. `bypassPermissions` is refused.
 - **From the original Claude:** `install-duo.sh` installs the script in

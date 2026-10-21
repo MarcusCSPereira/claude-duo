@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,9 @@ FAKE_CLAUDE = r'''
 import json, os, sys
 
 args = sys.argv[1:]
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": os.environ.get("FAKE_AUTH") != "out", "authMethod": "claude.ai"}))
+    sys.exit(0 if os.environ.get("FAKE_AUTH") != "out" else 1)
 request = "" if "--bg" in args or args[:1] in (["agents"], ["logs"], ["stop"]) else sys.stdin.read()
 leaked = sorted(k for k in os.environ if k.startswith(("CLAUDE", "ANTHROPIC_")) and k != "CLAUDE_CONFIG_DIR")
 with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as log:
@@ -46,7 +50,8 @@ elif "--bg" in args:
 else:
     session = args[args.index("--resume") + 1] if "--resume" in args else "sess-duo-0001"
     ok = mode == "ok"
-    # signed_out: what claude -p answers, at cost 0 and exit 1, when the account's CLI never signed in.
+    # signed_out: what claude -p answers, at cost 0 and exit 1, on a CLI that is not signed in; `auth status`
+    # still says signed in here, as when the sign-in check let the run through.
     text = {"ok": "Done: read the README.", "signed_out": "Not logged in · Please run /login"}.get(mode, "Exceeded USD budget")
     for event in [
         {"type": "system", "subtype": "init", "session_id": session},
@@ -129,12 +134,12 @@ class DuoSendTests(unittest.TestCase):
         self.assertIn("budget", end["error"])
         self.assertIsNone(end["hint"])
 
-    def test_a_signed_out_duo_cli_gets_the_command_that_signs_it_in(self):
+    def test_a_turn_that_says_not_logged_in_gets_the_login_command(self):
         duo = self.home / ".claude-duo"
         process, end = self.send_json("task", "--repo", str(self.repo), FAKE_MODE="signed_out")
         self.assertEqual(process.returncode, 1)
         self.assertIn("Not logged in", end["error"])
-        self.assertIn(f"`CLAUDE_CONFIG_DIR={duo} claude`, /login", end["hint"])
+        self.assertIn(f"`CLAUDE_CONFIG_DIR={duo} claude auth login`", end["hint"])
         self.assertIn(f"`CLAUDE_CONFIG_DIR={duo} claude auth status`", end["hint"])
         plain = self.send("send", "task", "--repo", str(self.repo), FAKE_MODE="signed_out")
         self.assertEqual(plain.returncode, 1)
@@ -197,6 +202,15 @@ class DuoSendTests(unittest.TestCase):
         self.assertIn("invalid choice", self.send("send", "t", "--permission", "bypassPermissions").stderr)
         self.assertEqual(self.calls(), [])
 
+    def test_a_signed_out_duo_cli_is_refused_with_the_login_command(self):
+        for args in (("send", "task", "--repo", str(self.repo)), ("send", "task", "--repo", str(self.repo), "--bg")):
+            with self.subTest(args=args):
+                process = self.send(*args, FAKE_AUTH="out")
+                self.assertEqual(process.returncode, 1)
+                self.assertIn("not signed in", process.stderr)
+                self.assertIn(f"CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude auth login", process.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_refuses_when_the_duo_account_has_no_code_folder(self):
         (self.home / ".claude-duo").rmdir()
         process = self.send("send", "task", "--repo", str(self.repo))
@@ -245,11 +259,15 @@ class DuoOpenTests(unittest.TestCase):
         self.opened = []
 
         def fake_run(argv, **kwargs):
+            if argv[1:3] == ["auth", "status"]:  # The sign-in check: signed in.
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"loggedIn": True}), "")
             self.opened.append(argv)
             return subprocess.CompletedProcess(argv, 0, "", "")
-        patcher = mock.patch.object(self.module.subprocess, "run", side_effect=fake_run)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(self.module.subprocess, "run", side_effect=fake_run),
+                        # No real claude is needed, or present on CI.
+                        mock.patch.object(self.module.loop, "claude_bin", return_value="/fake/bin/claude")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def write_config(self, links=""):
         self.config.write_text(f"@mode original-copy\n@apps user\n{links}\n"
@@ -318,6 +336,80 @@ class DuoOpenTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(message, err)
         self.assertEqual(self.opened, [])
+
+
+class DuoSessionsTests(unittest.TestCase):
+    """`sessions` reads the Duo's registry; synthetic entries and real sockets under /tmp/cc-socks only."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="duo-sessions-")
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.registry = self.home / ".claude-duo/sessions"
+        self.registry.mkdir(parents=True)
+        (self.home / ".claude/sessions").mkdir(parents=True)
+        self.sockets = []
+        self.env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin"}
+
+    def live_socket(self):
+        """A listening socket in /tmp/cc-socks with a pid number nothing else uses there."""
+        folder = Path("/tmp/cc-socks")
+        folder.mkdir(mode=0o700, exist_ok=True)
+        number = 900000000 + os.getpid() % 1000 * 1000 + len(self.sockets)
+        path = folder / f"{number}.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(path))
+        self.addCleanup(lambda: (server.close(), path.unlink(missing_ok=True)))
+        self.sockets.append(path)
+        return str(path)
+
+    def entry(self, name, *, pid=None, sock=None, status="idle", file=None):
+        data = {"pid": pid or os.getpid(), "name": name, "status": status, "kind": "interactive",
+                "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e", "cwd": "/x",
+                "messagingSocketPath": sock if sock is not None else self.live_socket()}
+        (self.registry / (file or f"{len(list(self.registry.iterdir()))}.json")).write_text(json.dumps(data))
+        return data
+
+    def run_sessions(self, *args):
+        return subprocess.run([sys.executable, "-I", str(SCRIPT), "sessions", *args], capture_output=True,
+                              text=True, env=self.env, timeout=60)
+
+    def test_lists_live_duo_sessions_with_their_address(self):
+        live = self.entry("[proj] Valete · telas", status="busy")
+        self.entry("Gone session", pid=2 ** 22 + 7, sock="/tmp/cc-socks/1.sock")  # process gone
+        self.entry("No socket", sock="/tmp/cc-socks/999999999.sock")
+        self.entry("Odd path", sock=str(self.home / "x.sock"))
+        # The original's registry is never read.
+        (self.home / ".claude/sessions/1.json").write_text(json.dumps({"pid": os.getpid(), "name": "Original one",
+                                                                         "messagingSocketPath": live["messagingSocketPath"]}))
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([(s["name"], s["address"]) for s in listed],
+                         [("[proj] Valete · telas", "uds:" + live["messagingSocketPath"])])
+        with_stale = json.loads(self.run_sessions("--all", "--json").stdout)["sessions"]
+        self.assertEqual(sorted(s["name"] for s in with_stale if not s["live"]), ["Gone session", "No socket", "Odd path"])
+        self.assertTrue(all(s["address"] is None for s in with_stale if not s["live"]))
+        plain = self.run_sessions().stdout
+        self.assertIn("busy   uds:" + live["messagingSocketPath"], plain)
+
+    def test_address_needs_exactly_one_match(self):
+        one = self.entry("[proj] Valete · telas")
+        self.entry("[proj] Valete · conferências")
+        found = self.run_sessions("telas", "--address")
+        self.assertEqual((found.returncode, found.stdout.strip()), (0, "uds:" + one["messagingSocketPath"]))
+        for args, error in ((("valete", "--address"), "2 open Duo sessions match"),
+                            (("nobody", "--address"), "0 open Duo sessions match"),
+                            (("--address",), "needs a name")):
+            with self.subTest(args=args):
+                process = self.run_sessions(*args)
+                self.assertEqual(process.returncode, 1)
+                self.assertIn(error, process.stderr)
+
+    def test_symlinked_or_broken_entries_are_skipped(self):
+        self.entry("Real")
+        (self.registry / "bad.json").write_text("not json")
+        (self.registry / "link.json").symlink_to(self.registry / "0.json")
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([s["name"] for s in listed], ["Real"])
 
 
 if __name__ == "__main__":
