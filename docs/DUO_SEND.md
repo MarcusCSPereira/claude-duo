@@ -102,14 +102,23 @@ How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION
 
 `duo-send` starts or continues its own sessions; it does not write into a
 session that is open in the Duo window. A `claude -p` session on the Duo's
-account can, though: on 2026-10-21, a read-only probe sent with `duo-send`
-(Claude Code 2.1.300, US$ 0.22) found that it has `ListAgents`, which listed
-the Duo app's five open sessions, and `SendMessage`, which it did not call.
-Session lists are per account (`<config>/sessions`), so the original's own
-sessions never see the Duo's.
+account can, through the session tools it has. Tested on 2026-10-21 with
+Claude Code 2.1.300:
 
-So a `send` whose task asks the Duo session to message one of its peers
-should reach that session in the Duo window. Not checked yet: whether the
-message really shows up there, and how an answer gets back, since the `-p`
-session ends with its turn (a `--bg` session stays alive and can be read with
-`logs`).
+- **It sees the Duo app's sessions.** A read-only probe (US$ 0.22) found
+  `ListAgents`, which listed the Duo app's five open sessions, and
+  `SendMessage`. Session lists are per account (`<config>/sessions`), so the
+  original's own sessions never see the Duo's.
+- **A message reaches an open Duo Desktop session.** A `send` whose task asked
+  for one `SendMessage` (US$ 0.29) delivered it to the target session, where it
+  arrived as a message from another session (`probe-bc`), in the Duo window.
+- **Addressing:** `to` must be the name exactly as `ListAgents` prints it,
+  bracketed folder prefix included (`[multi-claude-desktop] Session name`).
+  The name with the `[ref]` suffix was refused as "not reachable", and nothing
+  was sent.
+- **No way back yet:** the `-p` session ends with its turn, so a reply from the
+  Desktop session has nowhere to go. A `--bg` session stays alive and could
+  receive it, read with `duo-send.py logs`.
+
+Not built: a `duo-send.py message <session> "text"` that wraps this. Until
+then, a `send` whose task asks for one `SendMessage` does it.
