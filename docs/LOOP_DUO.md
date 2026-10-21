@@ -74,6 +74,11 @@ the other account must not inherit it. The Duo's account gets only its own
 `CLAUDE_CONFIG_DIR`. The original runs without the variable: pointed at
 `~/.claude`, it would move `~/.claude.json` into that folder.
 
+Each account's command line must be signed in, apart from its Desktop app:
+before the first round, `claude auth status` runs on both accounts, and a
+signed-out one stops the loop with the command to run in a Terminal
+(`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login` for the Duo's).
+
 ## Permissions
 
 - **Default mode `auto`.** `--permission` accepts `auto`, `acceptEdits`,

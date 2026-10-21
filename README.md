@@ -80,6 +80,21 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
 
+## Claude Code in the terminal for the Duo's account (loop-duo, duo-send)
+
+The Duo app and the `claude` command keep separate sign-ins: a Duo that works
+in its window still has a command line that never signed in. loop-duo and
+duo-send run `claude` on the Duo's account, so sign it in once, in a Terminal
+outside any Claude session, with the Duo's account:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login
+```
+
+`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth status` shows which account it
+is. The original's sign-in (`~/.claude`) is not touched. Both scripts check
+this before they start and print this command when it is missing.
+
 ## loop-duo: one account develops, the other reviews (optional)
 
 With both Code accounts on this Mac, one can develop and the other review in

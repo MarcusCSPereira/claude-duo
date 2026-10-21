@@ -73,6 +73,12 @@ TASK
   checkout, which rebuilds the Duo and quits and reopens both apps; do not run
   it or edit the config yourself.
 
+## When the script says "not signed in"
+
+The Duo's command line has its own sign-in. Give the user the command the
+error prints, to run in a Terminal outside any Claude session and sign in with
+the Duo's account; do not run it yourself.
+
 ## Do not
 
 - Do not pass `--permission bypassPermissions` (it is refused anyway).

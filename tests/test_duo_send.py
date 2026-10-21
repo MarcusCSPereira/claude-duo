@@ -24,6 +24,9 @@ FAKE_CLAUDE = r'''
 import json, os, sys
 
 args = sys.argv[1:]
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": os.environ.get("FAKE_AUTH") != "out", "authMethod": "claude.ai"}))
+    sys.exit(0 if os.environ.get("FAKE_AUTH") != "out" else 1)
 request = "" if "--bg" in args or args[:1] in (["agents"], ["logs"], ["stop"]) else sys.stdin.read()
 leaked = sorted(k for k in os.environ if k.startswith(("CLAUDE", "ANTHROPIC_")) and k != "CLAUDE_CONFIG_DIR")
 with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as log:
@@ -174,6 +177,15 @@ class DuoSendTests(unittest.TestCase):
         self.assertIn("invalid choice", self.send("send", "t", "--permission", "bypassPermissions").stderr)
         self.assertEqual(self.calls(), [])
 
+    def test_a_signed_out_duo_cli_is_refused_with_the_login_command(self):
+        for args in (("send", "task", "--repo", str(self.repo)), ("send", "task", "--repo", str(self.repo), "--bg")):
+            with self.subTest(args=args):
+                process = self.send(*args, FAKE_AUTH="out")
+                self.assertEqual(process.returncode, 1)
+                self.assertIn("not signed in", process.stderr)
+                self.assertIn(f"CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude auth login", process.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_refuses_when_the_duo_account_has_no_code_folder(self):
         (self.home / ".claude-duo").rmdir()
         process = self.send("send", "task", "--repo", str(self.repo))
@@ -222,11 +234,15 @@ class DuoOpenTests(unittest.TestCase):
         self.opened = []
 
         def fake_run(argv, **kwargs):
+            if argv[1:3] == ["auth", "status"]:  # The sign-in check: signed in.
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"loggedIn": True}), "")
             self.opened.append(argv)
             return subprocess.CompletedProcess(argv, 0, "", "")
-        patcher = mock.patch.object(self.module.subprocess, "run", side_effect=fake_run)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(self.module.subprocess, "run", side_effect=fake_run),
+                        # No real claude is needed, or present on CI.
+                        mock.patch.object(self.module.loop, "claude_bin", return_value="/fake/bin/claude")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def write_config(self, links=""):
         self.config.write_text(f"@mode original-copy\n@apps user\n{links}\n"

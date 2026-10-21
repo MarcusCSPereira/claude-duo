@@ -49,6 +49,11 @@ isolate the Duo the same way:
   Duo's `claude` gets only its own `CLAUDE_CONFIG_DIR`;
 - the Duo's folder comes from the installed config, with `~/.claude-duo` as
   the fallback; a Duo that never opened Code is refused;
+- the Duo's command line must be signed in on its own: the Duo app's
+  sign-in does not cover it. Before any work, `claude auth status` runs on the
+  Duo's account; when it says signed out, the script stops and prints the
+  command to run in a Terminal, outside any Claude session:
+  `CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login`, with the Duo's account;
 - the work happens in `--repo` (the current folder by default), with no branch
   or worktree of its own. For work that must not touch your checkout, point
   `--repo` at a worktree, or use loop-duo.
@@ -92,3 +97,19 @@ profile, not in the Duo window. After `duo/install-duo.sh --links`:
 - `open --session <uuid>` imports any Duo session by id.
 
 How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
+
+## Messages to sessions already open in the Duo app (tested, not built)
+
+`duo-send` starts or continues its own sessions; it does not write into a
+session that is open in the Duo window. A `claude -p` session on the Duo's
+account can, though: on 2026-10-21, a read-only probe sent with `duo-send`
+(Claude Code 2.1.300, US$ 0.22) found that it has `ListAgents`, which listed
+the Duo app's five open sessions, and `SendMessage`, which it did not call.
+Session lists are per account (`<config>/sessions`), so the original's own
+sessions never see the Duo's.
+
+So a `send` whose task asks the Duo session to message one of its peers
+should reach that session in the Duo window. Not checked yet: whether the
+message really shows up there, and how an answer gets back, since the `-p`
+session ends with its turn (a `--bg` session stays alive and can be read with
+`logs`).

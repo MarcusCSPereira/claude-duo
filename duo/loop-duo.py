@@ -24,6 +24,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -179,6 +180,31 @@ def claude_bin():
     if not found:
         raise Refused("the claude command is not on the PATH")
     return found
+
+
+def login_command(acct):
+    """What the user types in a Terminal to sign this account's Claude Code CLI in."""
+    if acct["id"] == "original":
+        return "claude auth login"
+    return f"CLAUDE_CONFIG_DIR={shlex.quote(str(acct['folder']))} claude auth login"
+
+
+def require_signed_in(acct):
+    """Refuses when `claude auth status` says the account's CLI is signed out.
+
+    The Desktop app keeps its own sign-in: a Duo that works in its window can
+    still have a CLI that never signed in. An unreadable answer lets the run go
+    on, and a real auth error then shows up in the turn itself.
+    """
+    try:
+        done = subprocess.run([claude_bin(), "auth", "status"], capture_output=True, text=True, timeout=30,
+                              stdin=subprocess.DEVNULL, env=environment(acct))
+        status = json.loads(done.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return
+    if isinstance(status, dict) and status.get("loggedIn") is False:
+        raise Refused(f"the {acct['id']} account's Claude Code CLI is not signed in; in a Terminal, run  "
+                      f"{login_command(acct)}  and sign in with that account")
 
 
 def gh_bin():
@@ -392,6 +418,8 @@ def run_loop(goal, *, dev="original", reviewer="duo", folder=None, worktree=True
                           "open Code with that account once")
     if not goal.strip():
         raise Refused("the goal is empty")
+    for acct in accounts.values():
+        require_signed_in(acct)
     for model in (model_dev, model_reviewer):
         if model and not MODEL.match(model):
             raise Refused(f"invalid model: {model!r}")
