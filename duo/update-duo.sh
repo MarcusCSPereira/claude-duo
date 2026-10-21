@@ -31,7 +31,7 @@ reopen() {
 
 if ! duo_quit_both; then
     log "apps did not quit within ${DUO_QUIT_TIMEOUT}s; still running (PID executable):"
-    { duo_app_processes "$DUO_SOURCE_APP"; duo_app_processes "$DUO_APP"; } | while IFS= read -r line; do log "  $line"; done
+    { duo_app_processes "$DUO_SOURCE_APP"; duo_app_processes "$DUO_APP" any; } | while IFS= read -r line; do log "  $line"; done
     duo_notify "Claude Duo" "$(duo_t "Could not quit Claude and Claude Duo. Quit both and try again. Log: $LOG" "Não consegui fechar o Claude e o Claude Duo. Feche os dois e tente de novo. Log: $LOG")"
     exit 1
 fi

@@ -26,12 +26,21 @@ exit 0
 '''
 # ps -o ppid=,comm= -p PID answers MOCK_PARENT for any PID: one ancestor, then launchd.
 PS = '''#!/bin/bash
-case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;; *) cat "$MOCK_DIR/running" 2>/dev/null ;; esac
+case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;;
+ *) cat "$MOCK_DIR/running" 2>/dev/null
+    # A process that outlives the app's quit for a few ps calls: "<calls left> <pid> <executable>".
+    if [ -s "$MOCK_DIR/linger" ]; then
+     read -r left pid exe < "$MOCK_DIR/linger"
+     if [ "$left" -gt 0 ]; then printf '%5d %s\\n' "$pid" "$exe"; printf '%s %s %s\\n' "$((left - 1))" "$pid" "$exe" > "$MOCK_DIR/linger"; fi
+    fi ;;
+esac
 exit 0
 '''
 OPEN = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/open.log"\n'
 DISPATCHER = '''#!/bin/bash
 printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
+# What a lingering process still had left when the build started (see the ps mock).
+[ ! -s "$MOCK_DIR/linger" ] || cut -d' ' -f1 "$MOCK_DIR/linger" >> "$MOCK_DIR/linger-at-build"
 [ "${MOCK_DISPATCH_FAIL:-}" != 1 ] || { echo "synthetic build failure" >&2; exit 1; }
 [ ! -e "$MOCK_DIR/dispatch-stale" ] || { echo "process 4242 (chrome-native-host) runs a deleted executable; quit it and retry" >&2; exit 1; }
 exit 0
@@ -208,6 +217,41 @@ class DuoToolsTests(unittest.TestCase):
         result = self.run_tool("update-duo.sh", "--yes")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
+
+    def crashpad(self, app):
+        return f"{app}/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler"
+
+    def test_update_waits_for_duo_executables_that_outlive_its_quit(self):
+        # Electron's crash handler detaches and lives on a few seconds; the
+        # builder refuses while anything from the Duo's bundle runs.
+        self.running(self.source_app, self.duo_app)
+        (self.mock / "linger").write_text(f"8 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duo", self.log("dispatcher.log"))
+        # Every build step started only once the crash handler was gone.
+        self.assertEqual(set(self.log("linger-at-build").split()), {"0"})
+
+    def test_a_duo_executable_that_never_exits_is_named_and_nothing_is_built(self):
+        self.running(self.duo_app)
+        (self.mock / "linger").write_text(f"100000 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log("dispatcher.log"), "")
+        self.assertIn(f"  777 {self.crashpad(self.duo_app)}\n", self.updater_log())
+
+    def test_leftovers_of_the_original_app_still_do_not_block(self):
+        self.processes(self.crashpad(self.source_app))
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log("open.log"), "")
+
+    def test_a_lingering_duo_helper_does_not_count_as_the_duo_being_open(self):
+        (self.mock / "linger").write_text(f"3 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log("open.log"), "")  # Not reopened: it was not open.
 
     def test_config_pointer_outside_the_config_folder_is_refused(self):
         outside = self.root / "evil.conf"
