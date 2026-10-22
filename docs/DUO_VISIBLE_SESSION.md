@@ -88,9 +88,11 @@ Evidence from Claude Desktop 2.42304.0 (`app.asar`, main process bundle),
 
 ## What changed in the build
 
-- **Config:** `@links claude-dev` or `@links none` (the default), once, before
-  the instance rows, and only in `original-copy` mode, which has exactly one
-  managed copy. Any other value, a late line or a repeated one is refused.
+- **Config:** `@links claude-dev [name]` or `@links none` (the default), once,
+  before the instance rows, and only in `original-copy` mode. With several
+  copies the name is required and picks the one copy that takes the links;
+  the others declare no scheme. Any other value, a name that is not
+  configured, a late line or a repeated one is refused.
 - **Builder** (`bin/claude-build-worker.sh`): after deleting the stock URL
   types, it adds exactly one: `CFBundleURLName` `Claude <name> links`,
   `CFBundleURLSchemes` `[claude-dev]`.
