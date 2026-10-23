@@ -107,11 +107,16 @@ duo_version() { "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Content
 # Contents/Helpers are started by other programs (chrome-native-host by
 # Chrome, disclaimer by the claude CLI) and outlive the app; as in the native
 # desktop-idle check (bin/claude-maintenance.h), only executables in a
-# Contents/MacOS count.
+# Contents/MacOS count. With "any", every executable inside the bundle counts,
+# as in the builder's check of the app it replaces (app-state): Electron's
+# chrome_crashpad_handler, in a framework's Helpers folder, detaches from the
+# app and lives on for a few seconds after it quits.
 duo_app_processes() {
-    local prefix="$1/Contents/" pid executable
+    local prefix="$1/Contents/" scope="${2:-}" pid executable
     while read -r pid executable; do
-        case "$executable" in "$prefix"MacOS/*|"$prefix"*/Contents/MacOS/*) printf '%s %s\n' "$pid" "$executable" ;; esac
+        case "$scope:$executable" in
+            ":$prefix"MacOS/*|":$prefix"*/Contents/MacOS/*|"any:$prefix"*) printf '%s %s\n' "$pid" "$executable" ;;
+        esac
     done < <("$PS" -axo pid=,comm=)
 }
 
@@ -139,10 +144,12 @@ duo_quit_app() {
     "$OSASCRIPT" -e "tell application id \"$(duo_as_text "$identifier")\" to quit" >/dev/null 2>&1 || true
 }
 
-# True while the original or any copy runs.
-duo_any_running() {
+# True while the original's main executable runs, or anything from a copy's
+# bundle: the builder refuses to replace a copy while any of its executables does.
+duo_still_running() {
     local app
-    for app in "$DUO_SOURCE_APP" "${DUO_APPS[@]}"; do duo_app_running "$app" && return 0; done
+    duo_app_running "$DUO_SOURCE_APP" && return 0
+    for app in "${DUO_APPS[@]}"; do [ -z "$(duo_app_processes "$app" any)" ] || return 0; done
     return 1
 }
 
@@ -151,7 +158,7 @@ duo_any_running() {
 duo_quit_all() {
     local waited=0 app
     for app in "$DUO_SOURCE_APP" "${DUO_APPS[@]}"; do duo_quit_app "$app"; done
-    while duo_any_running; do
+    while duo_still_running; do
         [ "$waited" -lt "$DUO_QUIT_TIMEOUT" ] || return 1
         "$SLEEP" 1
         waited=$((waited + 1))
