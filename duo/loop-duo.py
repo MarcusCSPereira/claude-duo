@@ -418,7 +418,7 @@ def open_pr(state, summary, verdict):
     title = state["goal"].strip().splitlines()[0][:72]
     body = (f"## Goal\n\n{state['goal'].strip()}\n\n## What was done\n\n{summary.strip()}\n\n"
             f"## Review ({state['reviewer']})\n\n{verdict.strip()}\n\n"
-            f"Made by Claude Duo's loop-duo: the {state['dev']} account developed and the {state['reviewer']} "
+            f"Made by Claude Squad's loop-duo: the {state['dev']} account developed and the {state['reviewer']} "
             f"account reviewed, in {state['round']} round(s). A person still has to review it before merging.\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n")
     args = [gh_bin(), "pr", "create", "--draft", "--head", area["branch"], "--title", title, "--body", body]

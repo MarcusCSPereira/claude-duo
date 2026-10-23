@@ -1,9 +1,9 @@
 #!/bin/bash -p
-# One-command Claude Duo setup from a reviewed checkout of this repository:
+# One-command Claude Squad setup from a reviewed checkout of this repository:
 # checks prerequisites, installs the pinned toolset, writes the Duo config,
-# installs the "Update Claude Duo" app and the update check, then builds
+# installs the "Update Claude Squad" app and the update check, then builds
 # the Duo (asking before closing Claude). Run from inside Claude, it hands the
-# build to the "Update Claude Duo" app instead. Safe to run again.
+# build to the "Update Claude Squad" app instead. Safe to run again.
 #   --no-auto-check   do not install the launch agent that asks after updates
 #   --no-build        prepare everything but do not build the Duo now
 #   --links           let the Duo take claude-dev:// links (duo-send.py open):
@@ -22,8 +22,9 @@ OSACOMPILE=/usr/bin/osacompile
 XCODE_SELECT=/usr/bin/xcode-select
 AGENT_LABEL=io.github.guibrbs.claude-duo.update-check
 AGENT="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-UPDATER_APP="$HOME/Applications/Update Claude Duo.app"
-LEGACY_UPDATER_APP="$HOME/Applications/Atualizar Claude Duo.app"
+UPDATER_APP="$HOME/Applications/Update Claude Squad.app"
+# Names earlier releases gave the updater.
+LEGACY_UPDATER_APPS=("$HOME/Applications/Update Claude Duo.app" "$HOME/Applications/Atualizar Claude Duo.app")
 
 auto_check=yes; build=yes; links=no; skill=yes; add=""
 step() { printf '\n==> %s\n' "$*"; }
@@ -47,7 +48,7 @@ if [ -n "$add" ]; then
 fi
 
 step "Checking prerequisites"
-[ "$(/usr/bin/uname -s)" = Darwin ] || fail 'Claude Duo only works on macOS'
+[ "$(/usr/bin/uname -s)" = Darwin ] || fail "$DUO_PRODUCT only works on macOS"
 [ "$(/usr/bin/id -u)" != 0 ] || fail 'run as your own user, not as root'
 "$XCODE_SELECT" -p >/dev/null 2>&1 || fail 'Xcode Command Line Tools are missing: run  xcode-select --install  and try again'
 [ -d "$DUO_SOURCE_APP" ] || fail "install the official Claude in $DUO_SOURCE_APP first"
@@ -137,12 +138,13 @@ done
 for file in duo-send.py loop-duo.py; do
     /usr/bin/install -m 700 "$DUO_TOOLS/$file" "$DUO_HOME/$file" || exit 1
 done
-# Earlier releases used Portuguese names; remove them so only one updater exists.
-/bin/rm -rf "$LEGACY_UPDATER_APP"
+# Earlier releases named the updater after the Duo (and in Portuguese);
+# remove them so only one updater exists.
+/bin/rm -rf "${LEGACY_UPDATER_APPS[@]}"
 /bin/rm -f "$DUO_HOME/atualizar-duo.sh" "$DUO_HOME/verificar-atualizacao.sh"
 script="do shell script \"/bin/bash -p \" & quoted form of \"$(duo_as_text "$DUO_HOME/update-duo.sh")\" & \" >/dev/null 2>&1 &\""
 /bin/rm -rf "$UPDATER_APP"
-"$OSACOMPILE" -o "$UPDATER_APP" -e "$script" || fail 'could not create the Update Claude Duo app'
+"$OSACOMPILE" -o "$UPDATER_APP" -e "$script" || fail 'could not create the Update Claude Squad app'
 echo "App: $UPDATER_APP"
 
 if [ "$skill" = yes ]; then
@@ -152,7 +154,7 @@ if [ "$skill" = yes ]; then
     if [ ! -d "$HOME/.claude" ] || [ -L "$HOME/.claude" ]; then
         echo "Skipped: the original Claude has no Code folder (~/.claude) yet; run this again after opening Code once."
     elif [ -L "$skill_dir" ] || { [ -e "$skill_dir" ] && ! /usr/bin/grep -qxF "$skill_mark" "$skill_dir/SKILL.md" 2>/dev/null; }; then
-        echo "Kept $skill_dir: it was not installed by Claude Duo."
+        echo "Kept $skill_dir: it was not installed by $DUO_PRODUCT."
     else
         /bin/mkdir -p "$skill_dir" || exit 1
         /usr/bin/install -m 644 "$DUO_TOOLS/skills/duo-send/SKILL.md" "$skill_dir/SKILL.md" || exit 1
@@ -189,9 +191,9 @@ if [ "$build" = yes ]; then
     elif [ "$inside" = yes ]; then
         # Building quits the Claude this installer runs in; the updater app
         # is launched by LaunchServices and survives that.
-        "$OPEN" -a "$UPDATER_APP" || fail 'could not open Update Claude Duo; open it from the Finder'
+        "$OPEN" -a "$UPDATER_APP" || fail 'could not open Update Claude Squad; open it from the Finder'
         deferred=yes
-        printf 'This installer runs inside Claude (in the Code tab, for example), and building quits Claude.\nOpened "Update Claude Duo", which runs outside it: choose "%s" and wait for the notification that it finished.\n' "$(duo_t "Update now" "Atualizar agora")"
+        printf 'This installer runs inside Claude (in the Code tab, for example), and building quits Claude.\nOpened "Update Claude Squad", which runs outside it: choose "%s" and wait for the notification that it finished.\n' "$(duo_t "Update now" "Atualizar agora")"
     else
         /bin/bash -p "$DUO_HOME/update-duo.sh" || fail "the build failed; see the log in $DUO_LOG_DIR"
     fi
@@ -206,4 +208,4 @@ fi
 if [ -n "$add" ]; then
     printf 'For loop-duo and duo-send, also sign in its command line, in a Terminal outside Claude:\n  CLAUDE_CONFIG_DIR=~/.claude-%s claude auth login\n' "$(duo_lower "$add")"
 fi
-printf 'To update later: open "Update Claude Duo" (or accept the prompt when Claude updates).\n'
+printf 'To update later: open "Update Claude Squad" (or accept the prompt when Claude updates).\n'

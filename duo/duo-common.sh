@@ -1,5 +1,5 @@
 #!/bin/bash -p
-# Shared helpers for the Claude Duo convenience tools (installer, updater,
+# Shared helpers for the Claude Squad convenience tools (installer, updater,
 # update check). They call the versioned toolset; they never edit apps or
 # profiles directly. External commands are absolute paths on purpose.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -12,6 +12,9 @@ PS=/bin/ps
 PLISTBUDDY=/usr/libexec/PlistBuddy
 SLEEP=/bin/sleep
 
+# The product is Claude Squad; Claude Duo stays the name of its first copy,
+# and the installed paths keep their claude-duo names.
+DUO_PRODUCT="Claude Squad"
 DUO_HOME="$HOME/.local/share/claude-duo"
 DUO_CONFIG_POINTER="$DUO_HOME/config-path"
 DUO_LOG_DIR="$HOME/Library/Logs/Claude Duo Updater"
@@ -39,12 +42,12 @@ duo_notify() {
 # Prints the chosen button; empty when dismissed or unavailable.
 duo_ask() {
     local message="$1" first="$2" second="$3"
-    "$OSASCRIPT" -e "button returned of (display alert \"Claude Duo\" message \"$(duo_as_text "$message")\" buttons {\"$(duo_as_text "$second")\", \"$(duo_as_text "$first")\"} default button \"$(duo_as_text "$first")\")" 2>/dev/null || true
+    "$OSASCRIPT" -e "button returned of (display alert \"$DUO_PRODUCT\" message \"$(duo_as_text "$message")\" buttons {\"$(duo_as_text "$second")\", \"$(duo_as_text "$first")\"} default button \"$(duo_as_text "$first")\")" 2>/dev/null || true
 }
 
 duo_config() {
     local path
-    [ -f "$DUO_CONFIG_POINTER" ] && [ ! -L "$DUO_CONFIG_POINTER" ] || { duo_error 'Claude Duo is not installed (run duo/install-duo.sh)'; return 1; }
+    [ -f "$DUO_CONFIG_POINTER" ] && [ ! -L "$DUO_CONFIG_POINTER" ] || { duo_error "$DUO_PRODUCT is not installed (run duo/install-duo.sh)"; return 1; }
     IFS= read -r path < "$DUO_CONFIG_POINTER" || true
     case "$path" in "$HOME"/.config/claude-instances/*.conf) ;; *) duo_error 'unexpected config location'; return 1 ;; esac
     [ -f "$path" ] && [ ! -L "$path" ] || { duo_error "missing config: $path"; return 1; }

@@ -134,7 +134,7 @@ def duo_app(to="duo"):
     """The copy's bundle id; the config's `@links claude-dev` line must give the links to that copy."""
     config = loop.installed_config()
     if not config:
-        raise Refused("Claude Duo is not installed (no config); run duo/install-duo.sh")
+        raise Refused("Claude Squad is not installed (no config); run duo/install-duo.sh")
     acct, found = loop.account(to), loop.copies()
     links = None
     for line in config.read_text(encoding="utf-8").splitlines():

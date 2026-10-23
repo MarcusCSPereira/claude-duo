@@ -7,8 +7,8 @@ same repository. One develops and the other reviews, round after round, until
 the reviewer approves the goal or a ceiling stops the loop.
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py run "goal" --repo ~/path/to/repo
-/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py list
+/usr/bin/python3 -I ~/claude-squad/duo/loop-duo.py run "goal" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-squad/duo/loop-duo.py list
 ```
 
 The script is self-contained: only the Python 3.9 standard library, which

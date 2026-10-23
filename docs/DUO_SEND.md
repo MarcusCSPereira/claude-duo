@@ -7,9 +7,9 @@ session on the original account, or you in a terminal, give a task to the
 Duo's account, in a repository you name.
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py agents
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py agents
 ```
 
 Like loop-duo, the script uses only the Python 3.9 standard library and does

@@ -307,19 +307,21 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(len(self.builds()), 1)
         self.assertIn("Claude Duo atualizado para", self.log("osascript.log"))
 
-    def test_installer_removes_the_earlier_portuguese_named_updater(self):
+    def test_installer_removes_the_updaters_of_earlier_releases(self):
         installer = self.installer_fixture()
-        legacy = self.home / "Applications/Atualizar Claude Duo.app"
-        (legacy / "Contents").mkdir(parents=True)
+        legacy = [self.home / "Applications/Atualizar Claude Duo.app", self.home / "Applications/Update Claude Duo.app"]
+        for app in legacy:
+            (app / "Contents").mkdir(parents=True)
         self.tools.mkdir(parents=True)
         for name in ("atualizar-duo.sh", "verificar-atualizacao.sh"):
             (self.tools / name).write_text("old\n")
         result = self.run_installer(installer, "--no-build", "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(legacy.exists())
+        for app in legacy:
+            self.assertFalse(app.exists(), app)
         self.assertFalse((self.tools / "atualizar-duo.sh").exists())
         self.assertFalse((self.tools / "verificar-atualizacao.sh").exists())
-        self.assertTrue((self.home / "Applications/Update Claude Duo.app").exists())
+        self.assertTrue((self.home / "Applications/Update Claude Squad.app").exists())
 
     # Installer
     def installer_fixture(self):
@@ -361,7 +363,7 @@ class DuoToolsTests(unittest.TestCase):
         for name in ("duo-common.sh", "update-duo.sh", "check-update.sh", "share-code-profile.py"):
             self.assertEqual((self.tools / name).stat().st_mode & 0o777, 0o700, name)
         self.assertIn("install", self.log("toolset.log"))
-        applet = self.home / "Applications/Update Claude Duo.app"
+        applet = self.home / "Applications/Update Claude Squad.app"
         self.assertTrue((applet / "Contents/Info.plist").exists())
         agent = self.home / "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist"
         data = plistlib.loads(agent.read_bytes())
@@ -420,7 +422,7 @@ class DuoToolsTests(unittest.TestCase):
         (own / "SKILL.md").write_text("my own duo-send\n")
         result = self.run_installer(installer, "--no-build", "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("not installed by Claude Duo", result.stdout)
+        self.assertIn("not installed by Claude Squad", result.stdout)
         self.assertEqual((own / "SKILL.md").read_text(), "my own duo-send\n")
         (own / "SKILL.md").unlink()
         own.rmdir()
@@ -455,7 +457,7 @@ class DuoToolsTests(unittest.TestCase):
         result = self.run_installer(installer, "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.builds()), 0)
-        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Duo.app"])
+        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Squad.app"])
         self.assertIn("runs inside Claude", result.stdout)
         self.assertIn('choose "Update now"', result.stdout)
 
@@ -467,7 +469,7 @@ class DuoToolsTests(unittest.TestCase):
         result = self.run_installer(installer, "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.builds()), 1)
-        self.assertNotIn("Update Claude Duo.app", self.log("open.log"))
+        self.assertNotIn("Update Claude Squad.app", self.log("open.log"))
 
     # Several copies (Duo, Trio)
     def test_update_with_several_copies_quits_builds_and_reopens_all(self):
@@ -588,17 +590,18 @@ class DuoToolsTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=60)
 
     def trashed(self):
-        folders = list((self.home / ".Trash").glob("Claude Duo uninstalled *"))
+        folders = list((self.home / ".Trash").glob("Claude Squad uninstalled *"))
         self.assertEqual(len(folders), 1)
         return folders[0]
 
     def test_uninstaller_moves_the_duo_to_the_trash_and_keeps_account_data(self):
         uninstaller = self.uninstall_fixture()
-        (self.home / "Applications/Atualizar Claude Duo.app/Contents").mkdir(parents=True)  # From an earlier release.
+        for earlier in ("Atualizar Claude Duo.app", "Update Claude Duo.app"):  # From earlier releases.
+            (self.home / "Applications" / earlier / "Contents").mkdir(parents=True)
         result = self.uninstall(uninstaller, "--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Duo.app",
-                 "Applications/Atualizar Claude Duo.app",
+        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Squad.app",
+                 "Applications/Update Claude Duo.app", "Applications/Atualizar Claude Duo.app",
                  "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist", ".local/share/claude-duo",
                  ".config/claude-instances/claude-duo.conf", "Library/Logs/Claude Duo Updater",
                  ".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH")
@@ -727,7 +730,7 @@ class DuoToolsTests(unittest.TestCase):
         for path in (self.trio_app, *self.trio_account):
             self.assertFalse(path.exists(), path)
             self.assertTrue((folder[0] / path.relative_to(self.home)).exists(), path)
-        for kept in (self.duo_app, *self.account, self.tools, self.home / "Applications/Update Claude Duo.app",
+        for kept in (self.duo_app, *self.account, self.tools, self.home / "Applications/Update Claude Squad.app",
                      self.home / ".local/share/claude-instances"):
             self.assertTrue(kept.exists(), kept)
         lines = config.read_text().splitlines()

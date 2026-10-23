@@ -1,5 +1,6 @@
 #!/bin/bash -p
-# Rebuilds every managed copy (Claude Duo, and any other in the config) from
+# Claude Squad's updater: rebuilds every managed copy (Claude Duo, and any
+# other in the config) from
 # the current official Claude: asks first, quits the original and the copies,
 # rebuilds and verifies with the installed toolset, relinks shared Code files,
 # then reopens whatever was open. --yes skips the question.
@@ -13,7 +14,7 @@ LOG="$DUO_LOG_DIR/update-$(/bin/date +%Y%m%d-%H%M%S).log"
 log() { printf '%s\n' "$*" >> "$LOG"; }
 
 if ! config="$(duo_config 2>>"$LOG")" || ! duo_load_copies "$config" 2>>"$LOG"; then
-    duo_notify "Claude Duo" "$(duo_t "Claude Duo is not installed. Run duo/install-duo.sh." "O Claude Duo não está instalado. Rode o duo/install-duo.sh.")"
+    duo_notify "$DUO_PRODUCT" "$(duo_t "$DUO_PRODUCT is not installed. Run duo/install-duo.sh." "O $DUO_PRODUCT não está instalado. Rode o duo/install-duo.sh.")"
     exit 1
 fi
 copies="$(duo_label)"; copies_pt="$(duo_label --pt-article)"
@@ -38,10 +39,10 @@ reopen() {
 if ! duo_quit_all; then
     log "apps did not quit within ${DUO_QUIT_TIMEOUT}s; still running (PID executable):"
     { duo_app_processes "$DUO_SOURCE_APP"; for app in "${DUO_APPS[@]}"; do duo_app_processes "$app" any; done; } | while IFS= read -r line; do log "  $line"; done
-    duo_notify "Claude Duo" "$(duo_t "Could not quit Claude and $copies. Quit them and try again. Log: $LOG" "Não consegui fechar o Claude e $copies_pt. Feche todos e tente de novo. Log: $LOG")"
+    duo_notify "$DUO_PRODUCT" "$(duo_t "Could not quit Claude and $copies. Quit them and try again. Log: $LOG" "Não consegui fechar o Claude e $copies_pt. Feche todos e tente de novo. Log: $LOG")"
     exit 1
 fi
-duo_notify "Claude Duo" "$(duo_t "Updating $copies… this takes about a minute." "Atualizando $copies_pt… leva cerca de um minuto.")"
+duo_notify "$DUO_PRODUCT" "$(duo_t "Updating $copies… this takes about a minute." "Atualizando $copies_pt… leva cerca de um minuto.")"
 versions=""
 for i in "${!DUO_NAMES[@]}"; do versions="$versions $(duo_lower "${DUO_NAMES[$i]}") $(duo_version "${DUO_APPS[$i]}" || echo none)"; done
 log "== $(/bin/date) source $(duo_version "$DUO_SOURCE_APP")$versions"
@@ -62,7 +63,7 @@ reopen
 if [ "$status" -eq 0 ]; then
     log "OK"
     version="$(duo_version "${DUO_APPS[0]}")"
-    duo_notify "Claude Duo" "$(duo_t "$copies updated to $version and verified." "$(plural "$copies atualizado para $version e verificado." "$copies atualizados para $version e verificados.")")"
+    duo_notify "$DUO_PRODUCT" "$(duo_t "$copies updated to $version and verified." "$(plural "$copies atualizado para $version e verificado." "$copies atualizados para $version e verificados.")")"
 else
     log "FAILED ($status)"
     # The native idle check names processes that run a deleted executable,
@@ -73,9 +74,9 @@ else
     done < "$LOG"
     if [ -n "$stale" ]; then
         name="${stale#* (}"; name="${name%%) runs*}"; pid="${stale%% *}"
-        duo_notify "Claude Duo" "$(duo_t "Update stopped: $name (PID $pid) still runs a file from the previous Claude. Quit that process and try again. Log: $LOG" "A atualização parou: $name (PID $pid) ainda roda um arquivo da versão anterior do Claude. Encerre esse processo e tente de novo. Log: $LOG")"
+        duo_notify "$DUO_PRODUCT" "$(duo_t "Update stopped: $name (PID $pid) still runs a file from the previous Claude. Quit that process and try again. Log: $LOG" "A atualização parou: $name (PID $pid) ainda roda um arquivo da versão anterior do Claude. Encerre esse processo e tente de novo. Log: $LOG")"
     else
-        duo_notify "Claude Duo" "$(duo_t "The update failed; the previous copies were kept. Log: $LOG" "A atualização falhou; as cópias anteriores foram mantidas. Log: $LOG")"
+        duo_notify "$DUO_PRODUCT" "$(duo_t "The update failed; the previous copies were kept. Log: $LOG" "A atualização falhou; as cópias anteriores foram mantidas. Log: $LOG")"
     fi
 fi
 exit "$status"

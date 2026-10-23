@@ -1,5 +1,5 @@
 #!/bin/bash -p
-# Removes Claude Duo: every managed copy (Claude Duo, and any other the
+# Removes Claude Squad: every managed copy (Claude Duo, and any other the
 # config lists), the updater app, the update check, the Duo tools, config and
 # logs, plus the shared toolset and retained build transactions when no other
 # config in ~/.config/claude-instances uses them. Everything is moved to one
@@ -19,8 +19,8 @@ set -u
 LAUNCHCTL=/bin/launchctl
 AGENT_LABEL=io.github.guibrbs.claude-duo.update-check
 AGENT="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-UPDATER_APP="$HOME/Applications/Update Claude Duo.app"
-LEGACY_UPDATER_APP="$HOME/Applications/Atualizar Claude Duo.app"
+UPDATER_APP="$HOME/Applications/Update Claude Squad.app"
+LEGACY_UPDATER_APPS=("$HOME/Applications/Update Claude Duo.app" "$HOME/Applications/Atualizar Claude Duo.app")
 CONFIGS="$HOME/.config/claude-instances"
 TOOLSET="$HOME/.local/share/claude-instances"
 
@@ -46,7 +46,7 @@ if [ -n "$only" ]; then
     picked=""
     for i in "${!DUO_NAMES[@]}"; do [ "$(duo_lower "${DUO_NAMES[$i]}")" != "$(duo_lower "$only")" ] || picked="$i"; done
     [ -n "$picked" ] || fail "Claude $only is not in $config"
-    [ "${#DUO_NAMES[@]}" -gt 1 ] || fail "Claude ${DUO_NAMES[$picked]} is the only copy: run without --only to remove Claude Duo entirely"
+    [ "${#DUO_NAMES[@]}" -gt 1 ] || fail "Claude ${DUO_NAMES[$picked]} is the only copy: run without --only to remove $DUO_PRODUCT entirely"
     DUO_NAMES=("${DUO_NAMES[$picked]}"); DUO_APPS=("${DUO_APPS[$picked]}")
 fi
 for i in "${!DUO_APPS[@]}"; do
@@ -103,7 +103,7 @@ if [ -f "$config" ] && [ ! -L "$config" ]; then
 fi
 
 items=("${DUO_APPS[@]}")
-[ -n "$only" ] || items+=("$UPDATER_APP" "$LEGACY_UPDATER_APP" "$AGENT" "$DUO_HOME" "$config" "$DUO_LOG_DIR")
+[ -n "$only" ] || items+=("$UPDATER_APP" "${LEGACY_UPDATER_APPS[@]}" "$AGENT" "$DUO_HOME" "$config" "$DUO_LOG_DIR")
 # The duo-send skill, only the copy the installer put there (never a symlink or the user's own).
 skill_dir="$HOME/.claude/skills/duo-send"
 if [ -z "$only" ] && [ -d "$skill_dir" ] && [ ! -L "$skill_dir" ] && /usr/bin/grep -qxF '<!-- claude-duo: installed by duo/install-duo.sh, which updates it; uninstall-duo.sh removes it -->' "$skill_dir/SKILL.md" 2>/dev/null; then
@@ -118,7 +118,7 @@ present=()
 for item in "${items[@]}"; do
     [ -e "$item" ] || [ -L "$item" ] && present+=("$item")
 done
-[ "${#present[@]}" -gt 0 ] || [ -n "$only" ] || { echo 'Nothing from Claude Duo was found.'; exit 0; }
+[ "${#present[@]}" -gt 0 ] || [ -n "$only" ] || { echo "Nothing from $DUO_PRODUCT was found."; exit 0; }
 
 if [ "${#present[@]}" -gt 0 ]; then
     echo 'Moving to the Trash:'
@@ -154,7 +154,7 @@ else
 fi
 [ "${#present[@]}" -gt 0 ] || { printf 'Removed Claude %s from the config.\n' "${DUO_NAMES[0]}"; exit 0; }
 # One folder per run, mirroring the paths under the home folder.
-label="Claude Duo"; [ -z "$only" ] || label="Claude ${DUO_NAMES[0]}"
+label="$DUO_PRODUCT"; [ -z "$only" ] || label="Claude ${DUO_NAMES[0]}"
 destination="$HOME/.Trash/$label uninstalled $(/bin/date +%Y-%m-%d\ %H.%M.%S)"
 [ ! -e "$destination" ] && [ ! -L "$destination" ] || fail "already exists: $destination"
 /bin/mkdir -p -m 700 "$destination" || exit 1
