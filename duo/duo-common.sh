@@ -104,7 +104,9 @@ duo_refresh() {
         CLAUDE_INSTANCES_CONF="$config" "$DUO_DISPATCHER" run claude-apps-refresh.sh "$@"
 }
 
-duo_version() { "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
+# Fails, printing nothing, when the app is not built: PlistBuddy alone would
+# print "File Doesn't Exist, Will Create" to stdout.
+duo_version() { [ -f "$1/Contents/Info.plist" ] && "$PLISTBUDDY" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 
 # Prints "PID executable" for the app and its Electron helpers. Helpers in
 # Contents/Helpers are started by other programs (chrome-native-host by

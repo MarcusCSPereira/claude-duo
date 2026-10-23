@@ -484,6 +484,12 @@ class DuoToolsTests(unittest.TestCase):
         self.assertIn("Claude Duo and Claude Trio updated to", self.log("osascript.log"))
         self.assertIn("source 2.0.0 duo 1.0.0 trio 1.0.0", self.updater_log())
 
+    def test_update_logs_a_copy_that_is_not_built_yet_as_none(self):
+        self.add_trio()
+        shutil.rmtree(self.trio_app)
+        self.assertEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        self.assertIn("source 2.0.0 duo 1.0.0 trio none\n", self.updater_log())
+
     def test_update_waits_for_every_copy_to_quit(self):
         self.add_trio()
         self.processes(f"{self.trio_app}/Contents/MacOS/Claude")
