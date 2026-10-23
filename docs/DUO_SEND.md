@@ -7,9 +7,9 @@ session on the original account, or you in a terminal, give a task to the
 Duo's account, in a repository you name.
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py agents
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py agents
 ```
 
 Like loop-duo, the script uses only the Python 3.9 standard library and does
@@ -37,8 +37,8 @@ which needs two things of its own. Seen with Claude Code 2.1.303.
 
    accept the trust prompt and `/exit`.
 
-If the Duo line of the config sets another `CLAUDE_CONFIG_DIR`, use that
-folder instead of `~/.claude-duo`. When `--bg` fails for an untrusted folder,
+If the Duo line of the config sets another `CLAUDE_CONFIG_DIR`, or `--to`
+names another copy, use that copy's folder instead of `~/.claude-duo`. When `--bg` fails for an untrusted folder,
 or a turn still answers `Please run /login` after the sign-in check let it
 through, `duo-send.py` prints the command that fixes it, with the right
 folders; `--json` puts it in `hint`.
@@ -77,6 +77,11 @@ isolate the Duo the same way:
   Duo's `claude` gets only its own `CLAUDE_CONFIG_DIR`;
 - the Duo's folder comes from the installed config, with `~/.claude-duo` as
   the fallback; a Duo that never opened Code is refused;
+- every command takes `--to NAME` for another managed copy of the config
+  (`--to trio`): its folder is the `CLAUDE_CONFIG_DIR` of its line, the role
+  prompt names it, and `--to original` or an unknown name is refused. `open`
+  reaches only the copy the config's `@links claude-dev <name>` line names,
+  because one app owns the scheme;
 - the Duo's command line must be signed in on its own: the Duo app's
   sign-in does not cover it. Before any work, `claude auth status` runs on the
   Duo's account; when it says signed out, the script stops and prints the

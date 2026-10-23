@@ -19,19 +19,30 @@ OSASCRIPT = '''#!/bin/bash
 printf '%s\\n' "$*" >> "$MOCK_DIR/osascript.log"
 case "$*" in
  *"display alert"*) printf '%s\\n' "${MOCK_ANSWER:-}" ;;
- *claudefordesktop*" to quit"*) [ "${MOCK_STUCK:-}" = 1 ] || { grep -v "/Claude.app/" "$MOCK_DIR/running" > "$MOCK_DIR/r"; mv "$MOCK_DIR/r" "$MOCK_DIR/running"; } ;;
- *" to quit"*) [ "${MOCK_STUCK:-}" = 1 ] || { grep -v "/Claude Duo.app/" "$MOCK_DIR/running" > "$MOCK_DIR/r"; mv "$MOCK_DIR/r" "$MOCK_DIR/running"; } ;;
+ *" to quit"*) [ "${MOCK_STUCK:-}" = 1 ] || {
+    id="$*"; id="${id#*application id \\\"}"; id="${id%%\\\"*}"
+    app="$(awk -v id="$id" '$1 == id { sub(/^[^ ]+ /, ""); print }' "$MOCK_DIR/ids")"
+    [ -z "$app" ] || { grep -vF "$app/" "$MOCK_DIR/running" > "$MOCK_DIR/r"; mv "$MOCK_DIR/r" "$MOCK_DIR/running"; }; } ;;
 esac
 exit 0
 '''
 # ps -o ppid=,comm= -p PID answers MOCK_PARENT for any PID: one ancestor, then launchd.
 PS = '''#!/bin/bash
-case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;; *) cat "$MOCK_DIR/running" 2>/dev/null ;; esac
+case "$*" in *ppid=*) printf '%s\\n' "${MOCK_PARENT:-1 /sbin/launchd}" ;;
+ *) cat "$MOCK_DIR/running" 2>/dev/null
+    # A process that outlives the app's quit for a few ps calls: "<calls left> <pid> <executable>".
+    if [ -s "$MOCK_DIR/linger" ]; then
+     read -r left pid exe < "$MOCK_DIR/linger"
+     if [ "$left" -gt 0 ]; then printf '%5d %s\\n' "$pid" "$exe"; printf '%s %s %s\\n' "$((left - 1))" "$pid" "$exe" > "$MOCK_DIR/linger"; fi
+    fi ;;
+esac
 exit 0
 '''
 OPEN = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$MOCK_DIR/open.log"\n'
 DISPATCHER = '''#!/bin/bash
 printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
+# What a lingering process still had left when the build started (see the ps mock).
+[ ! -s "$MOCK_DIR/linger" ] || cut -d' ' -f1 "$MOCK_DIR/linger" >> "$MOCK_DIR/linger-at-build"
 [ "${MOCK_DISPATCH_FAIL:-}" != 1 ] || { echo "synthetic build failure" >&2; exit 1; }
 [ ! -e "$MOCK_DIR/dispatch-stale" ] || { echo "process 4242 (chrome-native-host) runs a deleted executable; quit it and retry" >&2; exit 1; }
 exit 0
@@ -62,14 +73,30 @@ class DuoToolsTests(unittest.TestCase):
             self.write_mock(self.mock / name, code)
         self.config = self.home / ".config/claude-instances/claude-duo.conf"
         self.config.parent.mkdir(parents=True)
-        self.config.write_text("@mode original-copy\n")
+        self.config.write_text("@mode original-copy\n@apps user\n" + self.copy_line("Duo", 212))
         (self.tools / "config-path").write_text(str(self.config) + "\n")
         for name in ("duo-common.sh", "update-duo.sh", "check-update.sh"):
             self.install_patched(REPO / "duo" / name, self.tools / name)
         self.env = {"HOME": str(self.home), "USER": "tester", "PATH": "/usr/bin:/bin", "MOCK_DIR": str(self.mock)}
 
+    @staticmethod
+    def copy_line(name, hue):
+        lower = name.lower()
+        return (f"{name} | io.github.test.claude-{lower} | ~/Library/Application Support/Claude-{name} | {hue} | "
+                f"CLAUDE_CONFIG_DIR=~/.claude-{lower}\n")
+
+    def add_trio(self, version="1.0.0"):
+        self.trio_app = self.home / "Applications/Claude Trio.app"
+        self.make_app(self.trio_app, version, "io.github.test.claude-trio")
+        self.config.write_text(self.config.read_text() + self.copy_line("Trio", 275))
+
+    def builds(self):
+        return [line for line in self.log("dispatcher.log").splitlines() if line.endswith("|run claude-apps-refresh.sh")]
+
     def make_app(self, app, version, identifier):
         (app / "Contents/MacOS").mkdir(parents=True)
+        with open(self.mock / "ids", "a") as ids:
+            ids.write(f"{identifier} {app}\n")
         (app / "Contents/Info.plist").write_bytes(plistlib.dumps(
             {"CFBundleShortVersionString": version, "CFBundleIdentifier": identifier}))
 
@@ -134,7 +161,7 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log("osascript.log").count("display alert"), 1)
         self.assertEqual(self.log("dispatcher.log").splitlines(),
-                         [f"{self.config}|run claude-apps-refresh.sh Duo", f"{self.config}|run claude-apps-refresh.sh --verify"])
+                         [f"{self.config}|run claude-apps-refresh.sh", f"{self.config}|run claude-apps-refresh.sh --verify"])
 
     def test_check_does_nothing_when_not_installed(self):
         (self.tools / "config-path").unlink()
@@ -155,7 +182,7 @@ class DuoToolsTests(unittest.TestCase):
         result = self.run_tool("update-duo.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log("osascript.log").count(" to quit"), 2)
-        self.assertIn("Duo", self.log("dispatcher.log"))
+        self.assertEqual(len(self.builds()), 1)
         self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.source_app}", f"-a {self.duo_app}"])
         self.assertIn("updated to", self.log("osascript.log"))
 
@@ -197,7 +224,7 @@ class DuoToolsTests(unittest.TestCase):
         self.env["MOCK_STUCK"] = "1"
         result = self.run_tool("update-duo.sh", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Duo", self.log("dispatcher.log"))
+        self.assertEqual(len(self.builds()), 1)
         self.assertNotIn(" to quit", self.log("osascript.log"))
         self.assertEqual(self.log("open.log"), "")
 
@@ -208,6 +235,49 @@ class DuoToolsTests(unittest.TestCase):
         result = self.run_tool("update-duo.sh", "--yes")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.log("dispatcher.log"), "")
+
+    def crashpad(self, app):
+        return f"{app}/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler"
+
+    def test_update_waits_for_duo_executables_that_outlive_its_quit(self):
+        # Electron's crash handler detaches and lives on a few seconds; the
+        # builder refuses while anything from the Duo's bundle runs.
+        self.running(self.source_app, self.duo_app)
+        (self.mock / "linger").write_text(f"8 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.builds()), 1)
+        # Every build step started only once the crash handler was gone.
+        self.assertEqual(set(self.log("linger-at-build").split()), {"0"})
+
+    def test_a_duo_executable_that_never_exits_is_named_and_nothing_is_built(self):
+        self.running(self.duo_app)
+        (self.mock / "linger").write_text(f"100000 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log("dispatcher.log"), "")
+        self.assertIn(f"  777 {self.crashpad(self.duo_app)}\n", self.updater_log())
+
+    def test_an_executable_of_another_copy_that_never_exits_also_blocks_the_build(self):
+        self.add_trio()
+        (self.mock / "linger").write_text(f"100000 778 {self.crashpad(self.trio_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log("dispatcher.log"), "")
+        self.assertIn(f"  778 {self.crashpad(self.trio_app)}\n", self.updater_log())
+
+    def test_leftovers_of_the_original_app_still_do_not_block(self):
+        self.processes(self.crashpad(self.source_app))
+        self.env["MOCK_STUCK"] = "1"
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log("open.log"), "")
+
+    def test_a_lingering_duo_helper_does_not_count_as_the_duo_being_open(self):
+        (self.mock / "linger").write_text(f"3 777 {self.crashpad(self.duo_app)}\n")
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log("open.log"), "")  # Not reopened: it was not open.
 
     def test_config_pointer_outside_the_config_folder_is_refused(self):
         outside = self.root / "evil.conf"
@@ -234,22 +304,24 @@ class DuoToolsTests(unittest.TestCase):
         log = self.log("osascript.log")
         self.assertIn("O Claude foi atualizado para 2.0.0", log)
         self.assertIn('"Depois"', log)
-        self.assertIn("claude-apps-refresh.sh Duo", self.log("dispatcher.log"))
+        self.assertEqual(len(self.builds()), 1)
         self.assertIn("Claude Duo atualizado para", self.log("osascript.log"))
 
-    def test_installer_removes_the_earlier_portuguese_named_updater(self):
+    def test_installer_removes_the_updaters_of_earlier_releases(self):
         installer = self.installer_fixture()
-        legacy = self.home / "Applications/Atualizar Claude Duo.app"
-        (legacy / "Contents").mkdir(parents=True)
+        legacy = [self.home / "Applications/Atualizar Claude Duo.app", self.home / "Applications/Update Claude Duo.app"]
+        for app in legacy:
+            (app / "Contents").mkdir(parents=True)
         self.tools.mkdir(parents=True)
         for name in ("atualizar-duo.sh", "verificar-atualizacao.sh"):
             (self.tools / name).write_text("old\n")
         result = self.run_installer(installer, "--no-build", "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(legacy.exists())
+        for app in legacy:
+            self.assertFalse(app.exists(), app)
         self.assertFalse((self.tools / "atualizar-duo.sh").exists())
         self.assertFalse((self.tools / "verificar-atualizacao.sh").exists())
-        self.assertTrue((self.home / "Applications/Update Claude Duo.app").exists())
+        self.assertTrue((self.home / "Applications/Update Claude Squad.app").exists())
 
     # Installer
     def installer_fixture(self):
@@ -291,14 +363,14 @@ class DuoToolsTests(unittest.TestCase):
         for name in ("duo-common.sh", "update-duo.sh", "check-update.sh", "share-code-profile.py"):
             self.assertEqual((self.tools / name).stat().st_mode & 0o777, 0o700, name)
         self.assertIn("install", self.log("toolset.log"))
-        applet = self.home / "Applications/Update Claude Duo.app"
+        applet = self.home / "Applications/Update Claude Squad.app"
         self.assertTrue((applet / "Contents/Info.plist").exists())
         agent = self.home / "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist"
         data = plistlib.loads(agent.read_bytes())
         self.assertEqual(data["ProgramArguments"], ["/bin/bash", "-p", str(self.tools / "check-update.sh")])
         self.assertEqual(data["StartInterval"], 3600)
         self.assertIn("bootstrap", self.log("launchctl.log"))
-        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 0)  # --no-build
+        self.assertEqual(len(self.builds()), 0)  # --no-build
 
     def test_installer_rerun_keeps_an_existing_config_and_can_skip_the_agent(self):
         installer = self.installer_fixture()
@@ -350,7 +422,7 @@ class DuoToolsTests(unittest.TestCase):
         (own / "SKILL.md").write_text("my own duo-send\n")
         result = self.run_installer(installer, "--no-build", "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("not installed by Claude Duo", result.stdout)
+        self.assertIn("not installed by Claude Squad", result.stdout)
         self.assertEqual((own / "SKILL.md").read_text(), "my own duo-send\n")
         (own / "SKILL.md").unlink()
         own.rmdir()
@@ -384,8 +456,8 @@ class DuoToolsTests(unittest.TestCase):
         self.env["MOCK_PARENT"] = f"1 {self.source_app}/Contents/MacOS/Claude"
         result = self.run_installer(installer, "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 0)
-        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Duo.app"])
+        self.assertEqual(len(self.builds()), 0)
+        self.assertEqual(self.log("open.log").splitlines(), [f"-a {self.home}/Applications/Update Claude Squad.app"])
         self.assertIn("runs inside Claude", result.stdout)
         self.assertIn('choose "Update now"', result.stdout)
 
@@ -396,8 +468,112 @@ class DuoToolsTests(unittest.TestCase):
         self.env["MOCK_ANSWER"] = "Update now"
         result = self.run_installer(installer, "--no-auto-check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.log("dispatcher.log").count("claude-apps-refresh.sh Duo"), 1)
-        self.assertNotIn("Update Claude Duo.app", self.log("open.log"))
+        self.assertEqual(len(self.builds()), 1)
+        self.assertNotIn("Update Claude Squad.app", self.log("open.log"))
+
+    # Several copies (Duo, Trio)
+    def test_update_with_several_copies_quits_builds_and_reopens_all(self):
+        self.add_trio()
+        self.running(self.source_app, self.duo_app, self.trio_app)
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log("osascript.log").count(" to quit"), 3)
+        self.assertEqual(len(self.builds()), 1)  # One build covers every copy.
+        self.assertEqual(self.log("open.log").splitlines(),
+                         [f"-a {self.source_app}", f"-a {self.duo_app}", f"-a {self.trio_app}"])
+        self.assertIn("Claude Duo and Claude Trio updated to", self.log("osascript.log"))
+        self.assertIn("source 2.0.0 duo 1.0.0 trio 1.0.0", self.updater_log())
+
+    def test_update_logs_a_copy_that_is_not_built_yet_as_none(self):
+        self.add_trio()
+        shutil.rmtree(self.trio_app)
+        self.assertEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        self.assertIn("source 2.0.0 duo 1.0.0 trio none\n", self.updater_log())
+
+    def test_update_waits_for_every_copy_to_quit(self):
+        self.add_trio()
+        self.processes(f"{self.trio_app}/Contents/MacOS/Claude")
+        (self.mock / "ids").write_text("")  # No app leaves when asked to quit.
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.builds(), [])
+        self.assertIn(f"{self.trio_app}/Contents/MacOS/Claude", self.updater_log())
+
+    def test_update_relinks_shared_code_files_of_each_copy_that_shares_them(self):
+        self.add_trio()
+        self.write_mock(self.tools / "share-code-profile.py",
+                        f"import sys\nopen({str(self.mock / 'share.log')!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n")
+        (self.home / ".claude-trio").mkdir()
+        (self.home / ".claude-trio/.shared-from-original.json").write_text("{}")
+        self.assertEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        self.assertEqual(self.log("share.log").splitlines(),
+                         [f"--apply --destination {self.home}/.claude-trio --app {self.trio_app}"])
+
+    def test_check_asks_when_only_one_copy_is_behind_and_names_it(self):
+        self.add_trio("1.5.0")
+        info = plistlib.loads((self.duo_app / "Contents/Info.plist").read_bytes())
+        info["CFBundleShortVersionString"] = "2.0.0"
+        (self.duo_app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+        self.env["MOCK_ANSWER"] = "Later"
+        self.assertEqual(self.run_tool("check-update.sh").returncode, 0)
+        alert = self.log("osascript.log")
+        self.assertIn("Claude Trio is on 1.5.0", alert)
+        self.assertNotIn("Claude Duo is on", alert)
+
+    def test_check_ignores_a_copy_that_is_not_built_yet(self):
+        self.add_trio()
+        shutil.rmtree(self.trio_app)
+        info = plistlib.loads((self.duo_app / "Contents/Info.plist").read_bytes())
+        info["CFBundleShortVersionString"] = "2.0.0"
+        (self.duo_app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+        self.assertEqual(self.run_tool("check-update.sh").returncode, 0)
+        self.assertEqual(self.log("osascript.log"), "")
+
+    def test_installer_add_appends_a_copy_once_with_its_own_folders_and_color(self):
+        installer = self.installer_fixture()
+        for _ in range(2):  # Running it again adds nothing.
+            result = self.run_installer(installer, "--no-build", "--no-auto-check", "--add", "Trio")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = (self.home / ".config/claude-instances/claude-duo.conf").read_text().splitlines()
+        self.assertEqual([line.split(" | ")[0] for line in lines[2:]], ["Duo", "Trio"])
+        self.assertEqual(lines[3], "Trio | io.github.tester.claude-trio | ~/Library/Application Support/Claude-Trio"
+                                   " | 275 | CLAUDE_CONFIG_DIR=~/.claude-trio")
+        self.assertIn("already in the config", result.stdout)
+        self.assertIn("CLAUDE_CONFIG_DIR=~/.claude-trio claude auth login", result.stdout)
+        self.assertIn("Claude Trio", result.stdout)
+
+    def test_installer_add_names_the_duo_in_an_existing_links_line(self):
+        installer = self.installer_fixture()
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check", "--links").returncode, 0)
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        result = self.run_installer(installer, "--no-build", "--no-auto-check", "--add", "Trio")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = config.read_text().splitlines()
+        self.assertEqual(lines[:3], ["@mode original-copy", "@apps user", "@links claude-dev Duo"])
+        self.assertEqual(sum(line.startswith("@links") for line in lines), 1)
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        # --links with several copies keeps the one already named.
+        self.assertEqual(self.run_installer(installer, "--no-build", "--no-auto-check", "--links").returncode, 0)
+        self.assertEqual(config.read_text().splitlines()[2], "@links claude-dev Duo")
+
+    def test_installer_add_refuses_unusable_names(self):
+        installer = self.installer_fixture()
+        for name in ("original", "Original", "3rd", "two words", "a/b", "$(touch x)"):
+            with self.subTest(name=name):
+                result = self.run_installer(installer, "--no-build", "--no-auto-check", "--add", name)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.tools.exists())
+        self.assertNotEqual(self.run_installer(installer, "--add").returncode, 0)
+
+    def test_installer_builds_when_any_copy_is_missing_or_behind(self):
+        installer = self.installer_fixture()
+        info = plistlib.loads((self.duo_app / "Contents/Info.plist").read_bytes())
+        info["CFBundleShortVersionString"] = "2.0.0"
+        (self.duo_app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+        self.env["MOCK_ANSWER"] = "Update now"
+        result = self.run_installer(installer, "--no-auto-check", "--no-skill", "--add", "Trio")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.builds()), 1)  # The Duo was current; the Trio did not exist.
 
     # Uninstaller
     def uninstall_fixture(self):
@@ -420,17 +596,18 @@ class DuoToolsTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=60)
 
     def trashed(self):
-        folders = list((self.home / ".Trash").glob("Claude Duo uninstalled *"))
+        folders = list((self.home / ".Trash").glob("Claude Squad uninstalled *"))
         self.assertEqual(len(folders), 1)
         return folders[0]
 
     def test_uninstaller_moves_the_duo_to_the_trash_and_keeps_account_data(self):
         uninstaller = self.uninstall_fixture()
-        (self.home / "Applications/Atualizar Claude Duo.app/Contents").mkdir(parents=True)  # From an earlier release.
+        for earlier in ("Atualizar Claude Duo.app", "Update Claude Duo.app"):  # From earlier releases.
+            (self.home / "Applications" / earlier / "Contents").mkdir(parents=True)
         result = self.uninstall(uninstaller, "--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Duo.app",
-                 "Applications/Atualizar Claude Duo.app",
+        moved = ("Applications/Claude Duo.app", "Applications/Update Claude Squad.app",
+                 "Applications/Update Claude Duo.app", "Applications/Atualizar Claude Duo.app",
                  "Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist", ".local/share/claude-duo",
                  ".config/claude-instances/claude-duo.conf", "Library/Logs/Claude Duo Updater",
                  ".local/share/claude-instances", "Applications/.claude-txn.ABCDEFGH")
@@ -504,7 +681,7 @@ class DuoToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for path in originals:
             self.assertEqual((path / "original-account-data").read_text(), "keep")
-        self.assertIn("not Duo profile locations", result.stdout)
+        self.assertIn("not copy profile locations", result.stdout)
 
     def test_uninstaller_keeps_the_shared_toolset_while_another_config_uses_it(self):
         uninstaller = self.uninstall_fixture()
@@ -525,6 +702,72 @@ class DuoToolsTests(unittest.TestCase):
         self.assertIn("--yes", result.stderr)
         self.assertTrue(self.duo_app.exists())
         self.assertFalse((self.home / ".Trash").exists())
+
+    def two_copy_uninstall_fixture(self):
+        uninstaller = self.uninstall_fixture()
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.write_text(config.read_text().replace("@apps user\n", "@apps user\n@links claude-dev Trio\n")
+                          + "Trio | io.github.tester.claude-trio | ~/Library/Application Support/Claude-Trio | 275 | "
+                            "CLAUDE_CONFIG_DIR=~/.claude-trio\n")
+        self.trio_app = self.home / "Applications/Claude Trio.app"
+        self.make_app(self.trio_app, "1.0.0", "io.github.tester.claude-trio")
+        self.trio_account = [self.home / "Library/Application Support/Claude-Trio", self.home / ".claude-trio"]
+        for path in self.trio_account:
+            path.mkdir(parents=True)
+            (path / "invented-account-data").write_text("trio")
+        return uninstaller, config
+
+    def test_uninstaller_removes_every_copy(self):
+        uninstaller, _ = self.two_copy_uninstall_fixture()
+        result = self.uninstall(uninstaller, "--yes", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in (self.duo_app, self.trio_app, *self.account, *self.trio_account):
+            self.assertFalse(path.exists(), path)
+            self.assertTrue((self.trashed() / path.relative_to(self.home)).exists(), path)
+        self.assertIn('"Trio Claude Safe Storage"', result.stdout)
+
+    def test_uninstaller_only_removes_one_copy_and_its_line(self):
+        uninstaller, config = self.two_copy_uninstall_fixture()
+        (self.mock / "launchctl.log").unlink()
+        result = self.uninstall(uninstaller, "--yes", "--only", "trio", "--include-account-data")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        folder = list((self.home / ".Trash").glob("Claude Trio uninstalled *"))
+        self.assertEqual(len(folder), 1)
+        for path in (self.trio_app, *self.trio_account):
+            self.assertFalse(path.exists(), path)
+            self.assertTrue((folder[0] / path.relative_to(self.home)).exists(), path)
+        for kept in (self.duo_app, *self.account, self.tools, self.home / "Applications/Update Claude Squad.app",
+                     self.home / ".local/share/claude-instances"):
+            self.assertTrue(kept.exists(), kept)
+        lines = config.read_text().splitlines()
+        self.assertEqual(lines[:2], ["@mode original-copy", "@apps user"])
+        self.assertEqual([line.split(" | ")[0] for line in lines[2:]], ["Duo"])  # The @links line named the Trio.
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("bootout", self.log("launchctl.log"))
+
+    def test_uninstaller_only_keeps_links_that_name_another_copy(self):
+        uninstaller, config = self.two_copy_uninstall_fixture()
+        config.write_text(config.read_text().replace("@links claude-dev Trio", "@links claude-dev Duo"))
+        self.assertEqual(self.uninstall(uninstaller, "--yes", "--only", "Trio").returncode, 0)
+        self.assertIn("@links claude-dev Duo", config.read_text().splitlines())
+        for path in self.trio_account:
+            self.assertEqual((path / "invented-account-data").read_text(), "trio")
+
+    def test_uninstaller_only_refuses_the_last_copy_an_unknown_one_or_a_running_one(self):
+        uninstaller, config = self.two_copy_uninstall_fixture()
+        before = config.read_text()
+        self.running(self.trio_app)
+        running = self.uninstall(uninstaller, "--yes", "--only", "Trio")
+        self.assertNotEqual(running.returncode, 0)
+        self.assertIn("quit Claude Trio", running.stderr)
+        self.assertNotEqual(self.uninstall(uninstaller, "--yes", "--only", "Quatro").returncode, 0)
+        self.assertEqual(config.read_text(), before)
+        (self.mock / "running").unlink()
+        self.assertEqual(self.uninstall(uninstaller, "--yes", "--only", "Trio").returncode, 0)
+        last = self.uninstall(uninstaller, "--yes", "--only", "Duo")
+        self.assertNotEqual(last.returncode, 0)
+        self.assertIn("only copy", last.stderr)
+        self.assertTrue(self.duo_app.exists())
 
     def test_installer_refuses_without_prerequisites(self):
         installer = self.installer_fixture()
