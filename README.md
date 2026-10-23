@@ -56,8 +56,9 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 - **Open:** `Claude Duo` from the Dock, Launchpad or Spotlight. The original is
   still your usual `Claude`.
 - **Update:** when the official Claude updates, a prompt asks *"Update now?"*.
-  You can also open **Update Claude Duo** at any time. Either way, both apps
-  quit, the Duo is rebuilt and verified, and whatever was open reopens.
+  You can also open **Update Claude Duo** at any time. Either way, Claude and
+  every copy quit, the copies are rebuilt and verified, and whatever was open
+  reopens.
   Prompts and notifications follow your macOS language (English or Portuguese).
 - **Previous versions:** every update keeps the previous Duo in
   `~/Applications/.claude-txn.*` and nothing prunes them, so they take up disk
@@ -79,6 +80,24 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 ```bash
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
+
+## A third account (or more)
+
+Each extra account is one more copy, `Claude <name>`, with its own bundle id,
+Desktop profile, Code folder, Keychain item and icon color. Add it with the
+installer, which appends one line to the config and builds it:
+
+```bash
+~/claude-duo/duo/install-duo.sh --add Trio
+```
+
+The new line uses `~/Library/Application Support/Claude-Trio` and
+`~/.claude-trio`. Then open **~/Applications/Claude Trio** and sign in with
+the other account. **Update Claude Duo** and the hourly check now cover every
+copy: an update quits Claude and all copies, rebuilds them and reopens what was
+open. `claude-dev://` links (`--links`) go to one copy only, the Duo by
+default; the config names it (`@links claude-dev Duo`). To remove just one
+copy, run `uninstall-duo.sh --only Trio`.
 
 ## Claude Code in the terminal for the Duo's account (loop-duo, duo-send)
 
@@ -192,7 +211,7 @@ Details: [docs/DUO_SEND.md](docs/DUO_SEND.md).
 
 ## Uninstall
 
-Quit Claude Duo and run:
+Quit Claude Duo (and any other copy) and run:
 
 ```bash
 ~/claude-duo/duo/uninstall-duo.sh
@@ -202,7 +221,8 @@ The script shows the list and asks for confirmation. It then turns off the
 update check and moves everything into one folder in the Trash, deleting
 nothing:
 
-- `~/Applications/Claude Duo.app` and `~/Applications/Update Claude Duo.app`
+- `~/Applications/Claude Duo.app`, every other copy the config lists
+  (`Claude Trio.app`…) and `~/Applications/Update Claude Duo.app`
   (and the earlier `Atualizar Claude Duo.app`, if it is still there);
 - the update check, in `~/Library/LaunchAgents/io.github.guibrbs.claude-duo.update-check.plist`;
 - the Duo tools, in `~/.local/share/claude-duo`, and the config, in
@@ -212,14 +232,20 @@ nothing:
   versions, in `~/Applications/.claude-txn.*`. These two stay while another
   config in `~/.config/claude-instances` still uses them.
 
-The Duo account's data stays unless you run it with `--include-account-data`.
-That moves the Desktop and Code profiles the config's Duo line names, by default
+The accounts' data stays unless you run it with `--include-account-data`.
+That moves the Desktop and Code profiles each copy's line names, for the Duo by default
 `~/Library/Application Support/Claude-Duo` and `~/.claude-duo`. It never moves
 a folder outside the profile locations the toolset accepts for the Duo, such as
 the original's. If you
 used Code sharing, the shared items inside `~/.claude-duo` are links: moving
 them does not affect the originals in `~/.claude`. The `Duo Claude Safe
-Storage` item stays in the Keychain; delete it in Keychain Access if you want.
+Storage` item (and `Trio Claude Safe Storage`, for each copy) stays in the
+Keychain; delete it in Keychain Access if you want.
+
+`--only Trio` removes a single copy instead: its app (and, with
+`--include-account-data`, its profiles) go to the Trash, and its line leaves
+the config, together with `@links` when it names that copy. The Duo, the
+updater and the tools stay.
 
 ## Development
 

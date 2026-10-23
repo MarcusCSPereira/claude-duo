@@ -9,6 +9,10 @@
 #   --links           let the Duo take claude-dev:// links (duo-send.py open):
 #                     adds `@links claude-dev` to the config before building
 #   --no-skill        do not give the original Claude the duo-send skill
+#   --add NAME        add another managed copy, "Claude NAME", for one more
+#                     account: a line with its own bundle id, Desktop profile
+#                     (~/Library/Application Support/Claude-NAME), Code folder
+#                     (~/.claude-name) and icon color, then the build covers it
 DUO_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 source "$DUO_TOOLS/duo-common.sh" || exit 1
 set -u
@@ -21,18 +25,26 @@ AGENT="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 UPDATER_APP="$HOME/Applications/Update Claude Duo.app"
 LEGACY_UPDATER_APP="$HOME/Applications/Atualizar Claude Duo.app"
 
-auto_check=yes; build=yes; links=no; skill=yes
-for arg in "$@"; do
-    case "$arg" in
+auto_check=yes; build=yes; links=no; skill=yes; add=""
+step() { printf '\n==> %s\n' "$*"; }
+fail() { duo_error "$*"; exit 1; }
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --no-auto-check) auto_check=no ;;
         --no-build) build=no ;;
         --links) links=yes ;;
         --no-skill) skill=no ;;
-        *) duo_error "unknown option: $arg"; exit 2 ;;
+        --add) [ "$#" -ge 2 ] || { duo_error '--add needs a name'; exit 2; }; add="$2"; shift ;;
+        *) duo_error "unknown option: $1"; exit 2 ;;
     esac
+    shift
 done
-step() { printf '\n==> %s\n' "$*"; }
-fail() { duo_error "$*"; exit 1; }
+if [ -n "$add" ]; then
+    # Same rule as the toolset's instance names; "original" names the official
+    # account in loop-duo and duo-send.
+    [[ "$add" =~ ^[A-Za-z][A-Za-z0-9_-]{0,63}$ ]] || fail "invalid name for --add: use a letter followed by letters, digits, - or _"
+    [ "$(duo_lower "$add")" != original ] || fail '"original" is the official Claude; choose another name'
+fi
 
 step "Checking prerequisites"
 [ "$(/usr/bin/uname -s)" = Darwin ] || fail 'Claude Duo only works on macOS'
@@ -64,13 +76,46 @@ else
     /bin/chmod 600 "$config" || exit 1
 fi
 printf '%s\n' "$config" > "$DUO_CONFIG_POINTER" && /bin/chmod 600 "$DUO_CONFIG_POINTER" || exit 1
-if [ "$links" = yes ] && ! /usr/bin/grep -qx '[[:space:]]*@links claude-dev[[:space:]]*' "$config"; then
-    # One `@links claude-dev` right after `@apps`; any other @links line goes.
+duo_load_copies "$config" || exit 1
+if [ -n "$add" ]; then
+    known=no
+    for name in "${DUO_NAMES[@]}"; do [ "$(duo_lower "$name")" != "$(duo_lower "$add")" ] || known=yes; done
+    if [ "$known" = yes ]; then
+        echo "Claude $add is already in the config."
+    else
+        lower="$(duo_lower "$add")"
+        owner="$(printf '%s' "$USER" | /usr/bin/tr -c 'A-Za-z0-9-' '-' | /usr/bin/tr 'A-Z' 'a-z')"
+        # The first icon color no other copy uses (blue is the Duo's).
+        used="$(/usr/bin/awk -F'|' '!/^[[:space:]]*(@|#|$)/ { gsub(/[[:space:]]/, "", $4); print $4 }' "$config")"
+        hue=212
+        for candidate in 212 275 142 30 320 175 55 0; do
+            printf '%s\n' "$used" | /usr/bin/grep -qx "$candidate" || { hue="$candidate"; break; }
+        done
+        for folder in "$HOME/Library/Application Support/Claude-$add" "$HOME/.claude-$lower"; do
+            [ ! -e "$folder" ] || echo "Reusing $folder: it already exists (an earlier Claude $add?)."
+        done
+        printf '%s | io.github.%s.claude-%s | ~/Library/Application Support/Claude-%s | %s | CLAUDE_CONFIG_DIR=~/.claude-%s\n' \
+            "$add" "${owner:-user}" "$lower" "$add" "$hue" "$lower" >> "$config" || fail "could not add Claude $add to $config"
+        echo "Added: Claude $add"
+        duo_load_copies "$config" || exit 1
+    fi
+fi
+# LaunchServices gives claude-dev:// to one app: with several copies the
+# @links line names it. A bare line meant the only copy, which is the first.
+links_line=""
+if [ "${#DUO_NAMES[@]}" -gt 1 ] && /usr/bin/grep -qx '[[:space:]]*@links claude-dev[[:space:]]*' "$config"; then
+    links_line="@links claude-dev ${DUO_NAMES[0]}"
+elif [ "$links" = yes ] && ! /usr/bin/grep -Eq '^[[:space:]]*@links claude-dev([[:space:]]|$)' "$config"; then
+    links_line="@links claude-dev"
+    [ "${#DUO_NAMES[@]}" -eq 1 ] || links_line="@links claude-dev ${DUO_NAMES[0]}"
+fi
+if [ -n "$links_line" ]; then
+    # One @links line right after `@apps`; any other @links line goes.
     ( umask 077
-      /usr/bin/awk '/^[[:space:]]*@links/ { next } { print } /^[[:space:]]*@apps/ && !done { print "@links claude-dev"; done = 1 } END { exit done ? 0 : 3 }' \
-          "$config" > "$config.links.tmp" ) || { /bin/rm -f "$config.links.tmp"; fail "no @apps line in $config: add  @links claude-dev  before the Duo line by hand"; }
+      /usr/bin/awk -v links="$links_line" '/^[[:space:]]*@links/ { next } { print } /^[[:space:]]*@apps/ && !done { print links; done = 1 } END { exit done ? 0 : 3 }' \
+          "$config" > "$config.links.tmp" ) || { /bin/rm -f "$config.links.tmp"; fail "no @apps line in $config: add  $links_line  before the copy lines by hand"; }
     /bin/chmod 600 "$config.links.tmp" && /bin/mv -f "$config.links.tmp" "$config" || exit 1
-    echo "Links: claude-dev:// turned on (the build below applies it)"
+    echo "Links: claude-dev:// goes to Claude ${links_line#@links claude-dev } (the build below applies it)"
 fi
 echo "Config: $config"
 
@@ -133,10 +178,15 @@ fi
 
 deferred=no
 if [ "$build" = yes ]; then
-    step "Building Claude Duo"
-    if [ -d "$DUO_APP" ] && [ "$(duo_version "$DUO_APP")" = "$(duo_version "$DUO_SOURCE_APP")" ] && duo_refresh --verify >/dev/null 2>&1; then
-        echo "Claude Duo is already up to date and verified."
-    elif duo_inside_app "$DUO_SOURCE_APP" || duo_inside_app "$DUO_APP"; then
+    step "Building $(duo_label)"
+    current=yes; inside=no
+    for app in "${DUO_APPS[@]}"; do
+        [ -d "$app" ] && [ "$(duo_version "$app")" = "$(duo_version "$DUO_SOURCE_APP")" ] || current=no
+    done
+    for app in "$DUO_SOURCE_APP" "${DUO_APPS[@]}"; do duo_inside_app "$app" && inside=yes; done
+    if [ "$current" = yes ] && duo_refresh --verify >/dev/null 2>&1; then
+        echo "$(duo_label) already up to date and verified."
+    elif [ "$inside" = yes ]; then
         # Building quits the Claude this installer runs in; the updater app
         # is launched by LaunchServices and survives that.
         "$OPEN" -a "$UPDATER_APP" || fail 'could not open Update Claude Duo; open it from the Finder'
@@ -146,9 +196,14 @@ if [ "$build" = yes ]; then
         /bin/bash -p "$DUO_HOME/update-duo.sh" || fail "the build failed; see the log in $DUO_LOG_DIR"
     fi
 fi
+target="~/Applications/Claude Duo and sign in with your second account."
+[ -z "$add" ] || target="~/Applications/Claude $add and sign in with the account for it."
 if [ "$deferred" = yes ]; then
-    printf '\nAlmost done. After the notification, open ~/Applications/Claude Duo and sign in with your second account.\n'
+    printf '\nAlmost done. After the notification, open %s\n' "$target"
 else
-    printf '\nDone. Open ~/Applications/Claude Duo and sign in with your second account.\n'
+    printf '\nDone. Open %s\n' "$target"
+fi
+if [ -n "$add" ]; then
+    printf 'For loop-duo and duo-send, also sign in its command line, in a Terminal outside Claude:\n  CLAUDE_CONFIG_DIR=~/.claude-%s claude auth login\n' "$(duo_lower "$add")"
 fi
 printf 'To update later: open "Update Claude Duo" (or accept the prompt when Claude updates).\n'
