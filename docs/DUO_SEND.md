@@ -49,6 +49,11 @@ isolate the Duo the same way:
   Duo's `claude` gets only its own `CLAUDE_CONFIG_DIR`;
 - the Duo's folder comes from the installed config, with `~/.claude-duo` as
   the fallback; a Duo that never opened Code is refused;
+- every command takes `--to NAME` for another managed copy of the config
+  (`--to trio`): its folder is the `CLAUDE_CONFIG_DIR` of its line, the role
+  prompt names it, and `--to original` or an unknown name is refused. `open`
+  reaches only the copy the config's `@links claude-dev <name>` line names,
+  because one app owns the scheme;
 - the Duo's command line must be signed in on its own: the Duo app's
   sign-in does not cover it. Before any work, `claude auth status` runs on the
   Duo's account; when it says signed out, the script stops and prints the

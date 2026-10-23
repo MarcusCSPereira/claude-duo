@@ -68,6 +68,12 @@ out, the loop stops as `failed`.
 
 ## Accounts and environment
 
+`--dev` and `--reviewer` take `original` or any managed copy of the installed
+config, by its name in any case (`duo`, `trio`…); the folder is the
+`CLAUDE_CONFIG_DIR` of the copy's line. An unknown name is refused with the
+list of accounts this Mac has. Without a config there is one copy, the Duo at
+`~/.claude-duo`.
+
 The loop removes the `CLAUDE*` and `ANTHROPIC_*` variables from each
 `claude`'s environment. A Desktop session exports its own account in them, and
 the other account must not inherit it. The Duo's account gets only its own

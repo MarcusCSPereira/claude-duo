@@ -81,6 +81,8 @@ Then open **~/Applications/Claude Duo** and sign in with your second account.
 /usr/bin/python3 -I ~/claude-duo/scripts/share-code-profile.py --apply --backup-existing
 ```
 
+For another copy, add `--account Trio`.
+
 ## A third account (or more)
 
 Each extra account is one more copy, `Claude <name>`, with its own bundle id,
@@ -124,7 +126,8 @@ the same repository, round after round, until the reviewer approves:
 ```
 
 - **Roles:** by default the original account develops and the Duo's reviews.
-  To swap them, use `--dev duo --reviewer original`.
+  To swap them, use `--dev duo --reviewer original`. Any copy works the
+  same way: `--dev trio --reviewer duo`.
 - **Branch:** the work goes to a `loop-duo/<goal>-<id>` branch, created from
   HEAD in a worktree of its own. The reviewer runs without the edit tools,
   and a reviewer turn that changes the branch anyway does not count. Untracked
@@ -156,6 +159,8 @@ account, in a repository you name:
 - **`--bg`:** a background session on the Duo's account; returns its id at
   once. `duo-send.py agents`, `logs <id>`, `attach <id>` and `stop <id>` reach
   the Duo's sessions, which the original's `claude agents` does not list.
+- **Another copy:** every command takes `--to trio` (or the name of any copy
+  in the config) to reach that account instead of the Duo's.
 - **Talk to a session open in the Duo window:** `duo-send.py sessions` lists
   the Duo's open sessions with their `uds:/tmp/cc-socks/<pid>.sock` address;
   the original Claude's `SendMessage` to that address reaches the session, and
