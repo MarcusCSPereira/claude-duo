@@ -84,15 +84,17 @@ duo_load_copies() {
 
 # "Claude Duo", "Claude Duo and Claude Trio"... in the macOS language; with
 # --pt-article the Portuguese names take "o" ("o Claude Duo e o Claude Trio").
+# Names every copy, or only the copies given after the option.
 duo_label() {
-    local article="" i text="" last
-    [ "${1:-}" != --pt-article ] || article="$(duo_t "" "o ")"
-    last=$((${#DUO_NAMES[@]} - 1))
-    for i in "${!DUO_NAMES[@]}"; do
+    local article="" i text="" last names
+    [ "${1:-}" != --pt-article ] || { article="$(duo_t "" "o ")"; shift; }
+    if [ "$#" -gt 0 ]; then names=("$@"); else names=("${DUO_NAMES[@]}"); fi
+    last=$((${#names[@]} - 1))
+    for i in "${!names[@]}"; do
         if [ "$i" -gt 0 ]; then
             if [ "$i" -eq "$last" ]; then text="$text$(duo_t " and " " e ")"; else text="$text, "; fi
         fi
-        text="$text${article}Claude ${DUO_NAMES[$i]}"
+        text="$text${article}Claude ${names[$i]}"
     done
     printf '%s' "$text"
 }

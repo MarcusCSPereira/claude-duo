@@ -43,9 +43,13 @@ if ! duo_quit_all; then
     exit 1
 fi
 duo_notify "$DUO_PRODUCT" "$(duo_t "Updating $copies… this takes about a minute." "Atualizando $copies_pt… leva cerca de um minuto.")"
-versions=""
-for i in "${!DUO_NAMES[@]}"; do versions="$versions $(duo_lower "${DUO_NAMES[$i]}") $(duo_version "${DUO_APPS[$i]}" || echo none)"; done
-log "== $(/bin/date) source $(duo_version "$DUO_SOURCE_APP")$versions"
+versions=""; before=()
+for i in "${!DUO_NAMES[@]}"; do
+    before+=("$(duo_version "${DUO_APPS[$i]}" || echo none)")
+    versions="$versions $(duo_lower "${DUO_NAMES[$i]}") ${before[$i]}"
+done
+source_version="$(duo_version "$DUO_SOURCE_APP")"
+log "== $(/bin/date) source $source_version$versions"
 
 status=0
 { duo_refresh && duo_refresh --verify; } >> "$LOG" 2>&1 || status=$?
@@ -76,7 +80,28 @@ else
         name="${stale#* (}"; name="${name%%) runs*}"; pid="${stale%% *}"
         duo_notify "$DUO_PRODUCT" "$(duo_t "Update stopped: $name (PID $pid) still runs a file from the previous Claude. Quit that process and try again. Log: $LOG" "A atualização parou: $name (PID $pid) ainda roda um arquivo da versão anterior do Claude. Encerre esse processo e tente de novo. Log: $LOG")"
     else
-        duo_notify "$DUO_PRODUCT" "$(duo_t "The update failed; the previous copies were kept. Log: $LOG" "A atualização falhou; as cópias anteriores foram mantidas. Log: $LOG")"
+        # The build publishes one copy at a time: a failure after the first
+        # leaves the copies already rebuilt on the new version.
+        updated=(); behind=()
+        for i in "${!DUO_NAMES[@]}"; do
+            now="$(duo_version "${DUO_APPS[$i]}" || echo none)"
+            # Updated means rebuilt by this run onto the source's version;
+            # a copy that changed to anything else is still behind.
+            if [ "$now" = "$source_version" ]; then
+                [ "$now" = "${before[$i]}" ] || updated+=("${DUO_NAMES[$i]}")
+            else
+                behind+=("${DUO_NAMES[$i]}")
+            fi
+        done
+        # Portuguese agreement for a list of copies: COUNT SINGULAR PLURAL.
+        agree() { [ "$1" -eq 1 ] && printf '%s' "$2" || printf '%s' "$3"; }
+        if [ "${#updated[@]}" -eq 0 ]; then
+            duo_notify "$DUO_PRODUCT" "$(duo_t "The update failed; the previous copies were kept. Log: $LOG" "A atualização falhou; as cópias anteriores foram mantidas. Log: $LOG")"
+        elif [ "${#behind[@]}" -eq 0 ]; then
+            duo_notify "$DUO_PRODUCT" "$(duo_t "$(duo_label "${updated[@]}") updated to $source_version, but the update stopped before its last check. Run it again to finish. Log: $LOG" "$(duo_label --pt-article "${updated[@]}") $(agree "${#updated[@]}" "foi atualizado" "foram atualizados") para $source_version, mas a atualização parou antes da última conferência. Rode de novo para concluir. Log: $LOG")"
+        else
+            duo_notify "$DUO_PRODUCT" "$(duo_t "$(duo_label "${updated[@]}") updated to $source_version; $(duo_label "${behind[@]}") kept the previous version. Run the update again. Log: $LOG" "$(duo_label --pt-article "${updated[@]}") $(agree "${#updated[@]}" "foi atualizado" "foram atualizados") para $source_version; $(duo_label --pt-article "${behind[@]}") $(agree "${#behind[@]}" "ficou" "ficaram") na versão anterior. Rode a atualização de novo. Log: $LOG")"
+        fi
     fi
 fi
 exit "$status"
