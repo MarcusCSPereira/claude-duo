@@ -85,8 +85,13 @@ else
         updated=(); behind=()
         for i in "${!DUO_NAMES[@]}"; do
             now="$(duo_version "${DUO_APPS[$i]}" || echo none)"
-            [ "$now" = "${before[$i]}" ] || updated+=("${DUO_NAMES[$i]}")
-            [ "$now" = "$source_version" ] || behind+=("${DUO_NAMES[$i]}")
+            # Updated means rebuilt by this run onto the source's version;
+            # a copy that changed to anything else is still behind.
+            if [ "$now" = "$source_version" ]; then
+                [ "$now" = "${before[$i]}" ] || updated+=("${DUO_NAMES[$i]}")
+            else
+                behind+=("${DUO_NAMES[$i]}")
+            fi
         done
         # Portuguese agreement for a list of copies: COUNT SINGULAR PLURAL.
         agree() { [ "$1" -eq 1 ] && printf '%s' "$2" || printf '%s' "$3"; }

@@ -506,6 +506,15 @@ class DuoToolsTests(unittest.TestCase):
         self.assertNotEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
         self.assertIn("Claude Duo updated to 2.0.0, but the update stopped before its last check.", self.log("osascript.log"))
 
+    def test_copy_that_lost_its_bundle_is_not_reported_as_updated(self):
+        self.add_trio()
+        (self.mock / "partial.plist").write_text("")
+        (self.mock / "dispatch-partial").write_text(str(self.trio_app / "Contents/Info.plist"))
+        self.assertNotEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        notices = self.log("osascript.log")
+        self.assertIn("previous copies were kept", notices)
+        self.assertNotIn("updated to", notices)
+
     def test_partial_failure_in_portuguese_agrees_in_number(self):
         self.language = "pt-BR"
         for name in ("duo-common.sh", "update-duo.sh"):
