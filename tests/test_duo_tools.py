@@ -44,6 +44,8 @@ printf '%s|%s\\n' "$CLAUDE_INSTANCES_CONF" "$*" >> "$MOCK_DIR/dispatcher.log"
 # What a lingering process still had left when the build started (see the ps mock).
 [ ! -s "$MOCK_DIR/linger" ] || cut -d' ' -f1 "$MOCK_DIR/linger" >> "$MOCK_DIR/linger-at-build"
 [ "${MOCK_DISPATCH_FAIL:-}" != 1 ] || { echo "synthetic build failure" >&2; exit 1; }
+# A build that publishes the copy named in dispatch-partial, then fails.
+[ ! -e "$MOCK_DIR/dispatch-partial" ] || { cp "$MOCK_DIR/partial.plist" "$(cat "$MOCK_DIR/dispatch-partial")"; echo "synthetic failure after one copy" >&2; exit 1; }
 [ ! -e "$MOCK_DIR/dispatch-stale" ] || { echo "process 4242 (chrome-native-host) runs a deleted executable; quit it and retry" >&2; exit 1; }
 exit 0
 '''
@@ -483,6 +485,35 @@ class DuoToolsTests(unittest.TestCase):
                          [f"-a {self.source_app}", f"-a {self.duo_app}", f"-a {self.trio_app}"])
         self.assertIn("Claude Duo and Claude Trio updated to", self.log("osascript.log"))
         self.assertIn("source 2.0.0 duo 1.0.0 trio 1.0.0", self.updater_log())
+
+    def partial_build(self, app):
+        shutil.copyfile(self.source_app / "Contents/Info.plist", self.mock / "partial.plist")
+        (self.mock / "dispatch-partial").write_text(str(app / "Contents/Info.plist"))
+
+    def test_failure_after_one_copy_names_the_updated_and_the_pending_copy(self):
+        self.add_trio()
+        self.partial_build(self.trio_app)
+        result = self.run_tool("update-duo.sh", "--yes")
+        self.assertNotEqual(result.returncode, 0)
+        notices = self.log("osascript.log")
+        self.assertIn("Claude Trio updated to 2.0.0; Claude Duo kept the previous version. Run the update again.", notices)
+        self.assertNotIn("previous copies were kept", notices)
+
+    def test_failure_after_the_last_copy_says_the_copies_are_updated(self):
+        # The copy left behind by an earlier failed run is already current.
+        self.add_trio("2.0.0")
+        self.partial_build(self.duo_app)
+        self.assertNotEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        self.assertIn("Claude Duo updated to 2.0.0, but the update stopped before its last check.", self.log("osascript.log"))
+
+    def test_partial_failure_in_portuguese_agrees_in_number(self):
+        self.language = "pt-BR"
+        for name in ("duo-common.sh", "update-duo.sh"):
+            self.install_patched(REPO / "duo" / name, self.tools / name)
+        self.add_trio()
+        self.partial_build(self.trio_app)
+        self.assertNotEqual(self.run_tool("update-duo.sh", "--yes").returncode, 0)
+        self.assertIn("o Claude Trio foi atualizado para 2.0.0; o Claude Duo ficou na versão anterior.", self.log("osascript.log"))
 
     def test_update_logs_a_copy_that_is_not_built_yet_as_none(self):
         self.add_trio()
