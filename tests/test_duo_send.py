@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,9 @@ FAKE_CLAUDE = r'''
 import json, os, sys
 
 args = sys.argv[1:]
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": os.environ.get("FAKE_AUTH") != "out", "authMethod": "claude.ai"}))
+    sys.exit(0 if os.environ.get("FAKE_AUTH") != "out" else 1)
 request = "" if "--bg" in args or args[:1] in (["agents"], ["logs"], ["stop"]) else sys.stdin.read()
 leaked = sorted(k for k in os.environ if k.startswith(("CLAUDE", "ANTHROPIC_")) and k != "CLAUDE_CONFIG_DIR")
 with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as log:
@@ -174,6 +178,15 @@ class DuoSendTests(unittest.TestCase):
         self.assertIn("invalid choice", self.send("send", "t", "--permission", "bypassPermissions").stderr)
         self.assertEqual(self.calls(), [])
 
+    def test_a_signed_out_duo_cli_is_refused_with_the_login_command(self):
+        for args in (("send", "task", "--repo", str(self.repo)), ("send", "task", "--repo", str(self.repo), "--bg")):
+            with self.subTest(args=args):
+                process = self.send(*args, FAKE_AUTH="out")
+                self.assertEqual(process.returncode, 1)
+                self.assertIn("not signed in", process.stderr)
+                self.assertIn(f"CLAUDE_CONFIG_DIR={self.home / '.claude-duo'} claude auth login", process.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_refuses_when_the_duo_account_has_no_code_folder(self):
         (self.home / ".claude-duo").rmdir()
         process = self.send("send", "task", "--repo", str(self.repo))
@@ -195,6 +208,40 @@ class DuoSendTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(self.calls()[0]["folder"], str(custom))
 
+
+    def install_trio(self):
+        (self.home / ".claude-trio").mkdir()
+        config = self.home / ".config/claude-instances/claude-duo.conf"
+        config.parent.mkdir(parents=True)
+        config.write_text("@mode original-copy\n@apps user\n"
+                          "Duo | io.github.x.claude-duo | ~/Library/Application Support/Claude-Duo | 212 | CLAUDE_CONFIG_DIR=~/.claude-duo\n"
+                          "Trio | io.github.x.claude-trio | ~/Library/Application Support/Claude-Trio | 275 | CLAUDE_CONFIG_DIR=~/.claude-trio\n")
+        pointer = self.home / ".local/share/claude-duo/config-path"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text(str(config))
+
+    def test_to_sends_to_another_copy_of_the_config(self):
+        self.install_trio()
+        process, end = self.send_json("read the README", "--repo", str(self.repo), "--to", "Trio")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(end["account"], "trio")
+        [call] = self.calls()
+        self.assertEqual(call["folder"], str(self.home / ".claude-trio"))
+        self.assertIn("Claude Trio account", call["args"][call["args"].index("--append-system-prompt") + 1])
+        background, started = self.send_json("task", "--repo", str(self.repo), "--bg", "--to", "trio")
+        self.assertEqual(background.returncode, 0, background.stderr)
+        self.assertEqual(started["commands"]["attach"], f"CLAUDE_CONFIG_DIR={self.home / '.claude-trio'} claude attach 4a79120f")
+        self.assertEqual(self.send("logs", "4a79120f", "--to", "trio").returncode, 0)
+        self.assertEqual(self.calls()[-1]["folder"], str(self.home / ".claude-trio"))
+
+    def test_to_refuses_the_original_and_unknown_accounts(self):
+        self.install_trio()
+        for name, message in (("original", "names a copy"), ("quatro", "this Mac has: original, duo, trio")):
+            with self.subTest(name=name):
+                process = self.send("send", "task", "--repo", str(self.repo), "--to", name, "--json")
+                self.assertEqual(process.returncode, 1)
+                self.assertIn(message, json.loads(process.stdout)["error"])
+        self.assertEqual(self.calls(), [])
 
 class DuoOpenTests(unittest.TestCase):
     """`open` and `send --open`, in process, with `open` and `claude -p` replaced."""
@@ -222,11 +269,15 @@ class DuoOpenTests(unittest.TestCase):
         self.opened = []
 
         def fake_run(argv, **kwargs):
+            if argv[1:3] == ["auth", "status"]:  # The sign-in check: signed in.
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"loggedIn": True}), "")
             self.opened.append(argv)
             return subprocess.CompletedProcess(argv, 0, "", "")
-        patcher = mock.patch.object(self.module.subprocess, "run", side_effect=fake_run)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(self.module.subprocess, "run", side_effect=fake_run),
+                        # No real claude is needed, or present on CI.
+                        mock.patch.object(self.module.loop, "claude_bin", return_value="/fake/bin/claude")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def write_config(self, links=""):
         self.config.write_text(f"@mode original-copy\n@apps user\n{links}\n"
@@ -272,6 +323,24 @@ class DuoOpenTests(unittest.TestCase):
         self.assertEqual(json.loads(out)["opened"].split("?")[0], "claude-dev://resume")
         self.assertEqual(self.link()[2]["session"], session)
 
+    def add_trio(self, links):
+        self.write_config(links)
+        (self.home / ".claude-trio").mkdir()
+        self.config.write_text(self.config.read_text() + "Trio | io.github.tester.claude-trio | "
+                               "~/Library/Application Support/Claude-Trio | 275 | CLAUDE_CONFIG_DIR=~/.claude-trio\n")
+
+    def test_with_several_copies_only_the_one_the_links_name_opens_sessions(self):
+        self.add_trio("@links claude-dev Trio")
+        code, out, _ = self.main("open", "--repo", str(self.repo), "--to", "trio")
+        self.assertEqual(code, 0)
+        self.assertIn("opened in Claude Trio", out)
+        self.assertEqual(self.opened[-1][:3], ["/usr/bin/open", "-b", "io.github.tester.claude-trio"])
+        count = len(self.opened)
+        code, _, err = self.main("open", "--repo", str(self.repo))  # The Duo, which has no links now.
+        self.assertEqual(code, 1)
+        self.assertIn("the config gives claude-dev:// to Claude Trio", err)
+        self.assertEqual(len(self.opened), count)
+
     def test_without_links_in_the_config_nothing_runs_and_the_fix_is_named(self):
         self.write_config()
         with mock.patch.object(self.module.loop, "converse") as converse:
@@ -295,6 +364,80 @@ class DuoOpenTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(message, err)
         self.assertEqual(self.opened, [])
+
+
+class DuoSessionsTests(unittest.TestCase):
+    """`sessions` reads the Duo's registry; synthetic entries and real sockets under /tmp/cc-socks only."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="duo-sessions-")
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.registry = self.home / ".claude-duo/sessions"
+        self.registry.mkdir(parents=True)
+        (self.home / ".claude/sessions").mkdir(parents=True)
+        self.sockets = []
+        self.env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin"}
+
+    def live_socket(self):
+        """A listening socket in /tmp/cc-socks with a pid number nothing else uses there."""
+        folder = Path("/tmp/cc-socks")
+        folder.mkdir(mode=0o700, exist_ok=True)
+        number = 900000000 + os.getpid() % 1000 * 1000 + len(self.sockets)
+        path = folder / f"{number}.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(path))
+        self.addCleanup(lambda: (server.close(), path.unlink(missing_ok=True)))
+        self.sockets.append(path)
+        return str(path)
+
+    def entry(self, name, *, pid=None, sock=None, status="idle", file=None):
+        data = {"pid": pid or os.getpid(), "name": name, "status": status, "kind": "interactive",
+                "sessionId": "0f8fad5b-d9cb-469f-a165-70867728950e", "cwd": "/x",
+                "messagingSocketPath": sock if sock is not None else self.live_socket()}
+        (self.registry / (file or f"{len(list(self.registry.iterdir()))}.json")).write_text(json.dumps(data))
+        return data
+
+    def run_sessions(self, *args):
+        return subprocess.run([sys.executable, "-I", str(SCRIPT), "sessions", *args], capture_output=True,
+                              text=True, env=self.env, timeout=60)
+
+    def test_lists_live_duo_sessions_with_their_address(self):
+        live = self.entry("[proj] Valete · telas", status="busy")
+        self.entry("Gone session", pid=2 ** 22 + 7, sock="/tmp/cc-socks/1.sock")  # process gone
+        self.entry("No socket", sock="/tmp/cc-socks/999999999.sock")
+        self.entry("Odd path", sock=str(self.home / "x.sock"))
+        # The original's registry is never read.
+        (self.home / ".claude/sessions/1.json").write_text(json.dumps({"pid": os.getpid(), "name": "Original one",
+                                                                         "messagingSocketPath": live["messagingSocketPath"]}))
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([(s["name"], s["address"]) for s in listed],
+                         [("[proj] Valete · telas", "uds:" + live["messagingSocketPath"])])
+        with_stale = json.loads(self.run_sessions("--all", "--json").stdout)["sessions"]
+        self.assertEqual(sorted(s["name"] for s in with_stale if not s["live"]), ["Gone session", "No socket", "Odd path"])
+        self.assertTrue(all(s["address"] is None for s in with_stale if not s["live"]))
+        plain = self.run_sessions().stdout
+        self.assertIn("busy   uds:" + live["messagingSocketPath"], plain)
+
+    def test_address_needs_exactly_one_match(self):
+        one = self.entry("[proj] Valete · telas")
+        self.entry("[proj] Valete · conferências")
+        found = self.run_sessions("telas", "--address")
+        self.assertEqual((found.returncode, found.stdout.strip()), (0, "uds:" + one["messagingSocketPath"]))
+        for args, error in ((("valete", "--address"), "2 open Duo sessions match"),
+                            (("nobody", "--address"), "0 open Duo sessions match"),
+                            (("--address",), "needs a name")):
+            with self.subTest(args=args):
+                process = self.run_sessions(*args)
+                self.assertEqual(process.returncode, 1)
+                self.assertIn(error, process.stderr)
+
+    def test_symlinked_or_broken_entries_are_skipped(self):
+        self.entry("Real")
+        (self.registry / "bad.json").write_text("not json")
+        (self.registry / "link.json").symlink_to(self.registry / "0.json")
+        listed = json.loads(self.run_sessions("--json").stdout)["sessions"]
+        self.assertEqual([s["name"] for s in listed], ["Real"])
 
 
 if __name__ == "__main__":

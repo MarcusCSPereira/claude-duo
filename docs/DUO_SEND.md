@@ -7,9 +7,9 @@ session on the original account, or you in a terminal, give a task to the
 Duo's account, in a repository you name.
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
-/usr/bin/python3 -I ~/claude-duo/duo/duo-send.py agents
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py send "task" --repo ~/path/to/repo --bg
+/usr/bin/python3 -I ~/claude-squad/duo/duo-send.py agents
 ```
 
 Like loop-duo, the script uses only the Python 3.9 standard library and does
@@ -49,6 +49,16 @@ isolate the Duo the same way:
   Duo's `claude` gets only its own `CLAUDE_CONFIG_DIR`;
 - the Duo's folder comes from the installed config, with `~/.claude-duo` as
   the fallback; a Duo that never opened Code is refused;
+- every command takes `--to NAME` for another managed copy of the config
+  (`--to trio`): its folder is the `CLAUDE_CONFIG_DIR` of its line, the role
+  prompt names it, and `--to original` or an unknown name is refused. `open`
+  reaches only the copy the config's `@links claude-dev <name>` line names,
+  because one app owns the scheme;
+- the Duo's command line must be signed in on its own: the Duo app's
+  sign-in does not cover it. Before any work, `claude auth status` runs on the
+  Duo's account; when it says signed out, the script stops and prints the
+  command to run in a Terminal, outside any Claude session:
+  `CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login`, with the Duo's account;
 - the work happens in `--repo` (the current folder by default), with no branch
   or worktree of its own. For work that must not touch your checkout, point
   `--repo` at a worktree, or use loop-duo.
@@ -92,3 +102,37 @@ profile, not in the Duo window. After `duo/install-duo.sh --links`:
 - `open --session <uuid>` imports any Duo session by id.
 
 How to turn it on and how it works: [DUO_VISIBLE_SESSION.md](DUO_VISIBLE_SESSION.md).
+
+## Talking to a session already open in the Duo app
+
+Sessions of the same account talk with `ListAgents` and `SendMessage`. Each
+account lists only its own sessions (`<config>/sessions/<pid>.json`), so the
+original's sessions never see the Duo's by name. But every session also
+answers on a local socket, `/tmp/cc-socks/<pid>.sock`, which both accounts
+share, and `SendMessage` accepts that socket as an address:
+
+```bash
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions
+/usr/bin/python3 -I ~/.local/share/claude-duo/duo-send.py sessions "part of the name" --address
+```
+
+`sessions` reads the Duo's registry and lists its open sessions with status
+and address (`uds:/tmp/cc-socks/<pid>.sock`); `--address` prints only the
+address of the one session that matches. In the original Claude, `SendMessage`
+with `to` set to that address delivers the message to the session in the Duo
+window, idle or busy; the Duo session sees the sender's address and its reply
+comes back by itself.
+
+- **The address changes** when the session's process restarts (the Desktop
+  restarts it at times), so look it up right before sending, never keep it. A
+  stale address fails with "ENOENT … the peer process may have restarted":
+  look it up again.
+- **Tested on 2026-10-21** (Claude Code 2.1.304 in both apps): a session of
+  the original app sent to a Duo Desktop session by socket address, the
+  message arrived in the Duo window, and the Duo session's `SendMessage` reply
+  to the sender's address was delivered. Idle Duo sessions keep their process
+  and socket.
+- **No cost on either account** beyond the turns the two sessions take; no
+  extra session in between.
+- It relies on the socket address, an undocumented detail of Claude Code; if a
+  future version changes it, `sessions` lists no address and `send` remains.

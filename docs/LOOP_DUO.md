@@ -7,8 +7,8 @@ same repository. One develops and the other reviews, round after round, until
 the reviewer approves the goal or a ceiling stops the loop.
 
 ```bash
-/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py run "goal" --repo ~/path/to/repo
-/usr/bin/python3 -I ~/claude-duo/duo/loop-duo.py list
+/usr/bin/python3 -I ~/claude-squad/duo/loop-duo.py run "goal" --repo ~/path/to/repo
+/usr/bin/python3 -I ~/claude-squad/duo/loop-duo.py list
 ```
 
 The script is self-contained: only the Python 3.9 standard library, which
@@ -68,11 +68,22 @@ out, the loop stops as `failed`.
 
 ## Accounts and environment
 
+`--dev` and `--reviewer` take `original` or any managed copy of the installed
+config, by its name in any case (`duo`, `trio`…); the folder is the
+`CLAUDE_CONFIG_DIR` of the copy's line. An unknown name is refused with the
+list of accounts this Mac has. Without a config there is one copy, the Duo at
+`~/.claude-duo`.
+
 The loop removes the `CLAUDE*` and `ANTHROPIC_*` variables from each
 `claude`'s environment. A Desktop session exports its own account in them, and
 the other account must not inherit it. The Duo's account gets only its own
 `CLAUDE_CONFIG_DIR`. The original runs without the variable: pointed at
 `~/.claude`, it would move `~/.claude.json` into that folder.
+
+Each account's command line must be signed in, apart from its Desktop app:
+before the first round, `claude auth status` runs on both accounts, and a
+signed-out one stops the loop with the command to run in a Terminal
+(`CLAUDE_CONFIG_DIR=~/.claude-duo claude auth login` for the Duo's).
 
 ## Permissions
 
